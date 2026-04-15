@@ -1,0 +1,84 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-1.0.x", "rhel-openssl-3.0.x", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SponsorshipPolicy {
+  USER_PAYS
+  DEVELOPER_SPONSORS
+}
+
+model ApiKey {
+  id                    String            @id @default(cuid())
+  userId                String?           // Associated Supabase User ID
+  name                  String
+  key                   String            @unique
+  status                String            @default("Active")
+  sponsorshipPolicy     SponsorshipPolicy @default(DEVELOPER_SPONSORS)
+  markupPercentage      Int               @default(10)
+  maxSponsoredTxsPerUser Int               @default(5)
+  monthlyLimitUsd      Float             @default(100.0)
+  supportedGasTokens    String[]          @default(["USDCx"])
+  lastUsedAt            DateTime?
+  revokedAt             DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt @default(now())
+  usageLogs             UsageLog[]
+  transactions          Transaction[]
+
+  @@index([userId])
+  @@index([key])
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  txid        String   @unique
+  type        String
+  userAddress String
+  feeAmount   String
+  feeToken    String   @default("Token")
+  status      String   @default("Pending")
+  network     String   @default("mainnet")
+  userId      String?  // Associated Supabase User ID
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt @default(now())
+  apiKey      ApiKey?  @relation(fields: [apiKeyId], references: [id])
+  apiKeyId    String?
+
+  @@index([userId])
+  @@index([txid])
+}
+
+model UsageLog {
+  id           String   @id @default(cuid())
+  apiKeyId     String
+  apiKey       ApiKey   @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  endpoint     String
+  method       String
+  statusCode   Int
+  responseTime Int
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+
+  @@index([apiKeyId])
+  @@index([createdAt])
+}
+
+model Adapter {
+  id          String   @id @default(cuid())
+  userId      String?  // Associated Supabase User ID
+  name        String
+  address     String   @unique // The Stacks Principal (e.g. SP...executor)
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt @default(now())
+
+  @@index([userId])
+  @@index([address])
+}
