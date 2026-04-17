@@ -53,6 +53,8 @@ export interface FeeEstimateResult {
     relayerAddress?: string;
     /** VelumX paymaster contract address for this network */
     paymasterAddress?: string;
+    /** VelumX registry v1 contract address for this network */
+    registryAddress?: string;
 }
 
 /**
@@ -77,4 +79,59 @@ export interface SignedIntent {
     nonce: string | number;
     signature: string;
     network?: 'mainnet' | 'testnet';
+}
+
+// ── v5 DeFi Operation Params ────────────────────────────────────────────────
+
+/**
+ * Base parameters shared by all 6 DeFi convenience methods.
+ * All methods route through `execute-action-generic` on the v5 paymaster.
+ */
+export interface V5BaseParams {
+    /** The project-id principal registered in velumx-registry-v1 */
+    projectId: string;
+    /** The executor contract implementing velumx-executor-trait */
+    executor: string;
+    /** Action-specific payload (hex-encoded buffer) */
+    payload: string;
+    /** Fee amount in micro-units of feeToken */
+    feeAmount: string | number;
+    /** Contract principal of the SIP-010 fee token */
+    feeToken: string;
+}
+
+/** Parameters for a gasless swap via the v5 paymaster */
+export interface SwapParams extends V5BaseParams {
+    /** Override action-id (default: "swap") */
+    actionId?: string;
+}
+
+/** Parameters for a gasless bridge via the v5 paymaster */
+export interface BridgeParams extends V5BaseParams {
+    /** Override action-id (default: "bridge") */
+    actionId?: string;
+}
+
+/** Parameters for a gasless transfer via the v5 paymaster */
+export interface TransferParams extends V5BaseParams {
+    /** Override action-id (default: "transfer") */
+    actionId?: string;
+}
+
+/** Parameters for gasless add-liquidity via the v5 paymaster */
+export interface AddLiquidityParams extends V5BaseParams {
+    /** Override action-id (default: "add-liquidity") */
+    actionId?: string;
+}
+
+/** Parameters for gasless remove-liquidity via the v5 paymaster */
+export interface RemoveLiquidityParams extends V5BaseParams {
+    /** Override action-id (default: "remove-liquidity") */
+    actionId?: string;
+}
+
+/** Parameters for gasless staking/stacking via the v5 paymaster */
+export interface StakeParams extends V5BaseParams {
+    /** Override action-id (default: "stake") */
+    actionId?: string;
 }

@@ -1,5 +1,9 @@
 import { uintCV, principalCV, bufferCV, someCV, noneCV, Cl } from '@stacks/transactions';
-import { NetworkConfig, SponsorshipOptions, FeeEstimateResult, SponsorResult } from './types';
+import { 
+    NetworkConfig, SponsorshipOptions, FeeEstimateResult, SponsorResult,
+    SwapParams, BridgeParams, TransferParams, AddLiquidityParams, 
+    RemoveLiquidityParams, StakeParams 
+} from './types';
 
 /**
  * VelumXClient — The core SDK for integrating VelumX gasless sponsorship.
@@ -89,6 +93,48 @@ export class VelumXClient {
         }
 
         return response.json();
+    }
+
+    /**
+     * Get the ContractCall options for a gasless Swap via the v5 paymaster.
+     */
+    public getSwapOptions(params: SwapParams) {
+        return this.getExecuteGenericOptions({ ...params, actionId: params.actionId || 'swap', version: 'v5' });
+    }
+
+    /**
+     * Get the ContractCall options for a gasless Bridge via the v5 paymaster.
+     */
+    public getBridgeOptions(params: BridgeParams) {
+        return this.getExecuteGenericOptions({ ...params, actionId: params.actionId || 'bridge', version: 'v5' });
+    }
+
+    /**
+     * Get the ContractCall options for a gasless Transfer via the v5 paymaster.
+     */
+    public getTransferOptions(params: TransferParams) {
+        return this.getExecuteGenericOptions({ ...params, actionId: params.actionId || 'transfer', version: 'v5' });
+    }
+
+    /**
+     * Get the ContractCall options for gasless Add Liquidity via the v5 paymaster.
+     */
+    public getAddLiquidityOptions(params: AddLiquidityParams) {
+        return this.getExecuteGenericOptions({ ...params, actionId: params.actionId || 'add-liquidity', version: 'v5' });
+    }
+
+    /**
+     * Get the ContractCall options for gasless Remove Liquidity via the v5 paymaster.
+     */
+    public getRemoveLiquidityOptions(params: RemoveLiquidityParams) {
+        return this.getExecuteGenericOptions({ ...params, actionId: params.actionId || 'remove-liquidity', version: 'v5' });
+    }
+
+    /**
+     * Get the ContractCall options for gasless Staking/Stacking via the v5 paymaster.
+     */
+    public getStakeOptions(params: StakeParams) {
+        return this.getExecuteGenericOptions({ ...params, actionId: params.actionId || 'stake', version: 'v5' });
     }
 
     /**
@@ -239,6 +285,15 @@ export class VelumXClient {
         }
         if (version === 'v4') return 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.simple-paymaster-v4';
         return 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.universal-paymaster-v5';
+    }
+
+    /**
+     * Get the developer's Relayer Registry Address for the current network.
+     */
+    public getRegistryAddress(): string {
+        return this.config.network === 'mainnet'
+            ? 'SPKYNF473GQ1V0WWCF24TV7ZR1WYAKTC7AM8QGBW.velumx-registry-v1'
+            : 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.velumx-registry-v1';
     }
 
     private headers(): Record<string, string> {

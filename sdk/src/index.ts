@@ -36,5 +36,12 @@ export type {
     SponsorshipOptions,
     FeeEstimateResult,
     SponsorResult,
-    SignedIntent
+    SignedIntent,
+    V5BaseParams,
+    SwapParams,
+    BridgeParams,
+    TransferParams,
+    AddLiquidityParams,
+    RemoveLiquidityParams,
+    StakeParams
 } from './types';

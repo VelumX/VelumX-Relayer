@@ -98,7 +98,8 @@ app.post('/api/v1/estimate', validateApiKey, rateLimiters.estimate.middleware(),
         const relayerKey = paymasterService.getUserRelayerKey(req.userId!);
         const relayerAddress = getAddressFromPrivateKey(relayerKey.replace(/^0x/, ''), targetNetwork);
         const paymasterAddress = paymasterService.getPaymasterAddress(targetNetwork);
-        res.json({ ...estimation, relayerAddress, paymasterAddress });
+        const registryAddress = paymasterService.getRegistryAddress(targetNetwork);
+        res.json({ ...estimation, relayerAddress, paymasterAddress, registryAddress });
     } catch (error: any) {
         console.error("Estimation Error:", error);
         res.status(500).json({ error: error.message });

@@ -78,6 +78,16 @@ export class PaymasterService {
         return process.env.PAYMASTER_V5_TESTNET || 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.universal-paymaster-v5';
     }
 
+    /**
+     * Get the Registry v1 contract address for the target network
+     */
+    public getRegistryAddress(network: 'mainnet' | 'testnet'): string {
+        if (network === 'mainnet') {
+            return process.env.REGISTRY_V1_MAINNET || 'SPKYNF473GQ1V0WWCF24TV7ZR1WYAKTC7AM8QGBW.velumx-registry-v1';
+        }
+        return process.env.REGISTRY_V1_TESTNET || 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.velumx-registry-v1';
+    }
+
 
     private sanitizePrivateKey(key: string): string {
         if (!key) return '';
