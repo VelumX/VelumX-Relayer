@@ -9,7 +9,7 @@ export async function GET() {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const relayerUrl = process.env.NEXT_PUBLIC_VELUMX_RELAYER_URL || 'https://sgal-relayer.onrender.com';
+    const relayerUrl = process.env.NEXT_PUBLIC_VELUMX_RELAYER_URL || 'https://velumx-relayer.onrender.com';
 
     try {
         const response = await fetch(`${relayerUrl}/api/dashboard/export-key`, {
