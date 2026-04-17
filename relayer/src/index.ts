@@ -140,6 +140,10 @@ app.get('/api/dashboard/export-key', verifySupabaseToken, async (req: AuthReques
         res.json({
             mainnetAddress: getAddr(key, 'mainnet'),
             testnetAddress: getAddr(key, 'testnet'),
+            paymasterMainnet: paymasterService.getPaymasterAddress('mainnet'),
+            paymasterTestnet: paymasterService.getPaymasterAddress('testnet'),
+            registryMainnet: paymasterService.getRegistryAddress('mainnet'),
+            registryTestnet: paymasterService.getRegistryAddress('testnet'),
             key
         });
     } catch (error: any) {

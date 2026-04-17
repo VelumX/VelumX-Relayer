@@ -29,7 +29,8 @@
     "ioredis": "^5.10.1",
     "jsonwebtoken": "^9.0.3",
     "jwks-rsa": "^4.0.1",
-    "pg": "^8.19.0"
+    "pg": "^8.19.0",
+    "tslib": "^2.8.1"
   },
   "devDependencies": {
     "@stacks/wallet-sdk": "^7.2.0",
