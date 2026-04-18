@@ -194,9 +194,9 @@ export default function FundingPage() {
                         </div>
                     </div>
                     <div className="p-6 bg-white/[0.02] border border-white/10 rounded-xl">
-                        <h4 className="text-xs font-bold text-white mb-2 uppercase tracking-tight">V4 Multi-Tenant Revenue</h4>
+                        <h4 className="text-xs font-bold text-white mb-2 uppercase tracking-tight">Universal Gas Revenue</h4>
                         <p className="text-[10px] text-white/40 leading-relaxed">
-                            Fees from your users flow directly to this address. Use these funds to replenish your STX Gas Tank or withdraw at any time.
+                            Fees from your users flow directly to this address via the Trait-Forwarding Paymaster. Use these funds to replenish your STX Gas Tank or withdraw at any time.
                         </p>
                     </div>
                 </div>
@@ -250,7 +250,7 @@ export default function FundingPage() {
                                 </div>
                                 <div className="p-2.5 bg-emerald-500/[0.03] rounded-lg border border-emerald-500/10">
                                     <p className="text-[8px] text-emerald-400/40 uppercase font-black mb-1.5 tracking-tighter">Status</p>
-                                    <p className="text-[9px] font-bold text-emerald-400">READY FOR V4</p>
+                                    <p className="text-[9px] font-bold text-emerald-400">ACTIVE — UNIVERSAL GAS</p>
                                 </div>
                             </div>
                         </div>

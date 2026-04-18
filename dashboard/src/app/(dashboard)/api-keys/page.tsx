@@ -44,7 +44,7 @@ export default function ApiKeysPage() {
     const [newlyCreatedKey, setNewlyCreatedKey] = useState<string | null>(null);
     const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set());
     const { network: currentNetwork } = useWallet();
-    const [relayerInfo, setRelayerInfo] = useState<{ mainnetAddress: string; testnetAddress: string; paymasterMainnet: string; paymasterTestnet: string; registryMainnet: string; registryTestnet: string; key: string } | null>(null);
+    const [relayerInfo, setRelayerInfo] = useState<{ projectId: string; mainnetAddress: string; testnetAddress: string; paymasterMainnet: string; paymasterTestnet: string; registryMainnet: string; registryTestnet: string; key: string } | null>(null);
     const [isRelayerKeyVisible, setIsRelayerKeyVisible] = useState(false);
     const [isLoadingRelayer, setIsLoadingRelayer] = useState(true);
     const [editingKey, setEditingKey] = useState<ApiKey | null>(null);
@@ -313,15 +313,44 @@ export default function ApiKeysPage() {
                 </div>
             </div>
 
-            {/* Smart Contracts (v5) */}
+            {/* Project ID */}
+            {relayerInfo?.projectId && (
+                <div className="bg-white/[0.03] border border-white/10 rounded-xl p-6 flex flex-col h-full">
+                    <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center border border-white/10">
+                            <KeyRound className="w-5 h-5 text-white/60" />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-white">Project ID</h3>
+                            <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Use this in your SDK integration</p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2 group">
+                        <code className="flex-1 px-3 py-2 bg-black/40 rounded-lg text-xs text-white/60 font-mono border border-white/5 truncate">
+                            {relayerInfo.projectId}
+                        </code>
+                        <button
+                            onClick={() => copyToClipboard(relayerInfo.projectId)}
+                            className="p-2 bg-white/5 hover:bg-white/10 rounded-lg text-white/20 hover:text-white transition-all border border-white/5"
+                        >
+                            <Copy className="w-3.5 h-3.5" />
+                        </button>
+                    </div>
+                    <p className="text-[10px] text-white/20 mt-3 px-1 italic">
+                        * Pass this as projectId when initializing the VelumX SDK in your dApp.
+                    </p>
+                </div>
+            )}
+
+            {/* Smart Contracts */}
             <div className="bg-white/[0.03] border border-white/10 rounded-xl p-6 flex flex-col h-full mt-6">
                 <div className="flex items-center gap-3 mb-4">
                     <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center border border-white/10">
                         <Activity className="w-5 h-5 text-white/60" />
                     </div>
                     <div>
-                        <h3 className="font-bold text-white">VelumX v5 Smart Contracts</h3>
-                        <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Use these in your SDK initialization</p>
+                        <h3 className="font-bold text-white">VelumX Smart Contracts</h3>
+                        <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">On-chain infrastructure</p>
                     </div>
                 </div>
 

@@ -10,10 +10,10 @@
 npm install @velumx/sdk
 ```
 
-## Quick Start (v4.0.0)
+## Quick Start (Relayer v1 Architecture)
 
 ### 1. Initialize Client
-Initialize the client with your **Project Key** from the VelumX Dashboard.
+Initialize the client with your **API Key** from the VelumX Dashboard.
 
 ```typescript
 import { VelumXClient } from '@velumx/sdk';
@@ -24,55 +24,32 @@ const velumx = new VelumXClient({
 });
 ```
 
-### 2. Standardized Protocol Helpers
-VelumX v4 provides high-level helpers that generate contract-call options for specific protocols.
+#### Agnostic Universal Execution (Relayer v1 Executor Pattern)
+VelumX Relayer v1 uses a completely universal executor pattern. You do not need an on-chain registry. Simply deploy a small executor template for your target protocol (or use an existing one), pack your payload buffer, and call `getExecuteGenericOptions`.
 
-#### Velar Swap
 ```typescript
-const options = velumx.getVelarSwapOptions({
-  poolId: 1,
-  tokenIn: 'USDC',
-  tokenOut: 'STX',
-  dx: 1000000,
-  minDy: 980000,
-  feeToken: 'ALEX',
-  feeAmount: 50,
-  relayer: 'SP...developer-relayer'
+import { tupleCV, principalCV, uintCV, serializeCV } from '@stacks/transactions';
+
+// Example: Packing a generic buffer for an executor
+const payloadCv = tupleCV({
+  'router': principalCV('SP...router-address'),
+  'amount': uintCV(1000000)
 });
+const serializedPayload = serializeCV(payloadCv);
 
-await openContractCall(options);
-```
-
-#### ALEX Swap
-```typescript
-const options = velumx.getAlexSwapOptions({
-  tokenX: 'ALEX',
-  tokenY: 'STX',
-  factor: 100000000,
-  dx: 1000,
-  minDy: 950,
-  feeToken: 'USDC',
-  feeAmount: 1,
-  relayer: 'SP...developer-relayer'
-});
-
-await openContractCall(options);
-```
-
-#### Agnostic Universal Execution (Custom Adapters)
-If you have registered an **Adapter** on the VelumX Dashboard, you can execute its logic gaslessly:
-
-```typescript
-const options = velumx.getExecuteOptions({
-  executor: 'SP...your-dapp-adapter',
-  payload: '0x01abc...', // Your encoded Clarity logic
+const options = velumx.getExecuteGenericOptions({
+  executor: 'SP...your-dapp-executor',
+  payload: serializedPayload, // The packed Uint8Array
   feeToken: 'sBTC',
   feeAmount: 100,
-  relayer: 'SP...developer-relayer'
+  relayer: 'SP...developer-relayer',
+  version: 'relayer-v1'
 });
 
 await openContractCall(options);
 ```
+
+
 
 ## API Reference
 
@@ -83,21 +60,17 @@ await openContractCall(options);
 ##### `.estimateFee(options)`
 Get a real-time fee estimation based on current market rates and relayer overhead.
 
-##### `.getVelarSwapOptions(params)`
-Generates options for the `swap-velar-gasless` protocol call.
+##### `.getExecuteGenericOptions(params)`
+Generates options for the `execute-action-generic` handler in `velumx-relayer-1`.
 
-##### `.getExecuteOptions(params)`
-Generates options for the `execute-gasless` agnostic handler.
-
-## Adapter Registration
-To use the Universal Executor, you must register your contract principal as an **Adapter** in the VelumX Dashboard. This ensures the dashboard can track your dApp's specific logic and metrics.
+## Executor Contracts
+To use the Universal Executor, you simply deploy an executor contract that implements the `velumx-executor-trait`. You **do not** need to register anything on-chain. All configuration (supported tokens, API keys) is handled by your VelumX dashboard account!
 
 ---
 
-### v4.0.0 (Latest)
-- 🌍 **Agnostic Executor**: Full support for custom dApp logic via registered Adapters.
-- ⚡ **Native Velar**: Direct integration for high-performance Velar swaps.
-- 🔧 **Pimlico Helpers**: Simplified `getOptions` methods for common tasks.
-- 🔒 **Secured Payloads**: Improved payload versioning for future-proof upgrades.
+### Relayer v1 (Latest)
+- 🌍 **Universal Executor (Relayer v1)**: 100% universal support for ANY protocol without upgrading the core paymaster.
+- 🔒 **Clarity 4 Security**: Uses `restrict-assets?` to guarantee safe execution of custom developer traits.
+- 🚀 **Zero Admin On-Chain**: The on-chain registry has been completely removed. Backend handles all logic.
 
 Built with ❤️ by the VelumX team

@@ -1,8 +1,8 @@
 import { uintCV, principalCV, bufferCV, someCV, noneCV, Cl } from '@stacks/transactions';
-import { 
+import {
     NetworkConfig, SponsorshipOptions, FeeEstimateResult, SponsorResult,
-    SwapParams, BridgeParams, TransferParams, AddLiquidityParams, 
-    RemoveLiquidityParams, StakeParams 
+    SwapParams, BridgeParams, TransferParams, AddLiquidityParams,
+    RemoveLiquidityParams, StakeParams
 } from './types';
 
 /**
@@ -218,29 +218,60 @@ export class VelumXClient {
      * Use this with @stacks/connect's openContractCall().
      */
     public getExecuteGenericOptions(params: {
-        projectId: string;
-        actionId: string;
+        projectId?: string;
+        actionId?: string;
         executor: string;
-        payload: string;
+        payload: string | Uint8Array;
         feeAmount: string | number;
         feeToken: string;
-        version?: 'v4' | 'v5';
+        relayer?: string;
+        version?: 'v1' | 'v4' | 'v5' | 'relayer-v1';
+        token1?: string;
+        token2?: string;
+        token3?: string;
+        token4?: string;
     }) {
-        const paymaster = this.getPaymasterAddress(this.config.network, params.version || 'v5');
+        const paymaster = this.getPaymasterAddress(this.config.network, params.version || 'relayer-v1');
         const [contractAddress, contractName] = paymaster.split('.');
+
+        let payloadBuffer: Uint8Array;
+        if (typeof params.payload === 'string') {
+             payloadBuffer = Buffer.from(params.payload.replace(/^0x/, ''), 'hex');
+        } else {
+             payloadBuffer = params.payload;
+        }
+
+        let functionArgs;
+        
+        if (params.version === 'v5' || params.version === 'v4') {
+            functionArgs = [
+                principalCV(params.projectId || this.getRegistryAddress()),
+                Cl.stringAscii(params.actionId || 'generic'),
+                principalCV(params.executor),
+                bufferCV(payloadBuffer),
+                uintCV(params.feeAmount),
+                principalCV(params.feeToken)
+            ];
+        } else {
+            // relayer-v1 architecture (Trait-Forwarding)
+            functionArgs = [
+                principalCV(params.executor),
+                bufferCV(payloadBuffer),
+                uintCV(params.feeAmount),
+                principalCV(params.relayer || this.getRegistryAddress()), 
+                principalCV(params.feeToken),
+                params.token1 ? someCV(principalCV(params.token1)) : noneCV(),
+                params.token2 ? someCV(principalCV(params.token2)) : noneCV(),
+                params.token3 ? someCV(principalCV(params.token3)) : noneCV(),
+                params.token4 ? someCV(principalCV(params.token4)) : noneCV(),
+            ];
+        }
 
         return {
             contractAddress,
             contractName,
             functionName: 'execute-action-generic',
-            functionArgs: [
-                principalCV(params.projectId),
-                Cl.stringAscii(params.actionId),
-                principalCV(params.executor),
-                bufferCV(Buffer.from(params.payload.replace(/^0x/, ''), 'hex')),
-                uintCV(params.feeAmount),
-                principalCV(params.feeToken)
-            ],
+            functionArgs,
             sponsored: true,
             network: this.config.network
         };
@@ -278,13 +309,17 @@ export class VelumXClient {
     /**
      * Internal: Get the Paymaster address for the target network.
      */
-    private getPaymasterAddress(network: 'mainnet' | 'testnet', version: 'v4' | 'v5' = 'v5'): string {
+    private getPaymasterAddress(network: 'mainnet' | 'testnet', version: 'v1' | 'v4' | 'v5' | 'relayer-v1' = 'relayer-v1'): string {
         if (network === 'mainnet') {
             if (version === 'v4') return 'SPKYNF473GQ1V0WWCF24TV7ZR1WYAKTC7AM8QGBW.simple-paymaster-v4';
-            return 'SPKYNF473GQ1V0WWCF24TV7ZR1WYAKTC7AM8QGBW.universal-paymaster-v5';
+            if (version === 'v5') return 'SPKYNF473GQ1V0WWCF24TV7ZR1WYAKTC7AM8QGBW.universal-paymaster-v5';
+            if (version === 'v1') return 'SPKYNF473GQ1V0WWCF24TV7ZR1WYAKTC7AM8QGBW.velumx-paymaster-1';
+            return 'SPKYNF473GQ1V0WWCF24TV7ZR1WYAKTC7AM8QGBW.velumx-paymaster-1-1';
         }
         if (version === 'v4') return 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.simple-paymaster-v4';
-        return 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.universal-paymaster-v5';
+        if (version === 'v5') return 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.universal-paymaster-v5';
+        if (version === 'v1') return 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.velumx-paymaster-1';
+        return 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.velumx-paymaster-1-1';
     }
 
     /**
@@ -302,5 +337,44 @@ export class VelumXClient {
             h['x-api-key'] = this.config.apiKey;
         }
         return h;
+    }
+
+    /**
+     * Universal sponsorCall: The single entry point for any gasless transaction.
+     * 1. Generates the sponsorship intent.
+     * 2. Coordinates signing of the intent and the transaction.
+     * 3. Sends to the VelumX Relayer for sponsorship and settlement.
+     */
+    public async sponsorCall(params: {
+        projectId: string;
+        txHex: string;     
+        intent: {
+            user: string;
+            userPubKey: string;
+            token: string;
+            amount: string;
+            expiration: number;
+            nonce: number;
+            signature: string;
+        };
+        network?: 'mainnet' | 'testnet';
+    }): Promise<SponsorResult> {
+        const response = await fetch(`${this.relayerUrl}/sponsor-universal`, {
+            method: 'POST',
+            headers: this.headers(),
+            body: JSON.stringify({
+                projectId: params.projectId,
+                txHex: params.txHex,
+                intent: params.intent,
+                network: params.network || this.config.network
+            })
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({ error: response.statusText })) as any;
+            throw new Error(`Universal sponsorship failed: ${err.error || err.message || response.statusText}`);
+        }
+
+        return response.json() as Promise<SponsorResult>;
     }
 }

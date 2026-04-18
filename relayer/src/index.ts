@@ -132,12 +132,35 @@ app.post('/api/v1/broadcast', validateApiKey, rateLimiters.broadcast.middleware(
     }
 });
 
+app.post('/api/v1/sponsor-universal', validateApiKey, rateLimiters.broadcast.middleware(), async (req: ApiKeyRequest, res: express.Response) => {
+    try {
+        const { projectId, txHex, intent, network } = req.body;
+        if (!projectId) return res.status(400).json({ error: "Missing projectId" });
+        if (!txHex) return res.status(400).json({ error: "Missing transaction hex" });
+        if (!intent) return res.status(400).json({ error: "Missing intent" });
+
+        const result = await paymasterService.sponsorUniversalCall({
+            projectId,
+            txHex,
+            intent,
+            network: network || 'mainnet'
+        });
+
+        if (req.userId) await invalidateStatsCache(req.userId);
+        res.json(result);
+    } catch (error: any) {
+        console.error("Universal Sponsorship Error:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 app.get('/api/dashboard/export-key', verifySupabaseToken, async (req: AuthRequest, res: express.Response) => {
     try {
         const userId = req.userId!;
         const key = paymasterService.getUserRelayerKey(userId);
         const { getAddressFromPrivateKey: getAddr } = await import('@stacks/transactions');
         res.json({
+            projectId: userId,
             mainnetAddress: getAddr(key, 'mainnet'),
             testnetAddress: getAddr(key, 'testnet'),
             paymasterMainnet: paymasterService.getPaymasterAddress('mainnet'),
