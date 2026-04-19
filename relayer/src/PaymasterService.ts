@@ -534,12 +534,11 @@ export class PaymasterService {
 
                     if (actualMonthlySpendUsd >= apiKey.monthlyLimitUsd) {
                         throw new Error(
-                            `Monthly sponsorship budget of ` USD has been reached. ` +
-                            `Actual spend this month: ` USD (` txs).`
+                            `Monthly sponsorship budget of $${apiKey.monthlyLimitUsd} USD has been reached. ` +
+                            `Actual spend this month: $${actualMonthlySpendUsd.toFixed(4)} USD (${monthlyTxCount} txs).`
                         );
                     }
                 }
-            }
             }
         } catch (policyErr: any) {
             // Re-throw policy violations; log and continue for DB/config errors
