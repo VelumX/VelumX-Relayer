@@ -8,7 +8,7 @@ import { STACKS_MAINNET, STACKS_TESTNET } from '@stacks/network';
 import { verifySupabaseToken, AuthRequest } from './auth.js';
 import { createRateLimiters } from './middleware/rateLimiter.js';
 import { StatusSyncService } from './StatusSyncService.js';
-import { getCachedStats, setCachedStats, invalidateStatsCache } from './services/RedisClient.js';
+import { getCachedStats, setCachedStats, invalidateStatsCache, getRedisClient } from './services/RedisClient.js';
 
 dotenv.config();
 
@@ -16,7 +16,7 @@ const prisma = new PrismaClient();
 const statusSync = new StatusSyncService();
 statusSync.start();
 
-const rateLimiters = createRateLimiters();
+const rateLimiters = createRateLimiters(getRedisClient());
 const app = express();
 const port = process.env.PORT || 4000;
 
@@ -88,7 +88,7 @@ app.get('/api/v1/config', validateApiKey, async (req: ApiKeyRequest, res: expres
     }
 });
 
-app.post('/api/v1/estimate', validateApiKey, rateLimiters.estimate.middleware(), async (req: ApiKeyRequest, res: express.Response) => {
+app.post('/api/v1/estimate', validateApiKey, rateLimiters.estimateIp.middleware(), rateLimiters.estimate.middleware(), async (req: ApiKeyRequest, res: express.Response) => {
     try {
         const { intent, network } = req.body;
         if (!intent) return res.status(400).json({ error: "Missing intent" });
@@ -106,7 +106,7 @@ app.post('/api/v1/estimate', validateApiKey, rateLimiters.estimate.middleware(),
     }
 });
 
-app.post('/api/v1/sponsor', validateApiKey, rateLimiters.sponsor.middleware(), async (req: ApiKeyRequest, res: express.Response) => {
+app.post('/api/v1/sponsor', validateApiKey, rateLimiters.sponsorIp.middleware(), rateLimiters.sponsor.middleware(), async (req: ApiKeyRequest, res: express.Response) => {
     try {
         const { intent } = req.body;
         if (!intent || !intent.signature) return res.status(400).json({ error: "Missing signed intent" });
@@ -119,7 +119,7 @@ app.post('/api/v1/sponsor', validateApiKey, rateLimiters.sponsor.middleware(), a
     }
 });
 
-app.post('/api/v1/broadcast', validateApiKey, rateLimiters.broadcast.middleware(), async (req: ApiKeyRequest, res: express.Response) => {
+app.post('/api/v1/broadcast', validateApiKey, rateLimiters.broadcastIp.middleware(), rateLimiters.broadcast.middleware(), async (req: ApiKeyRequest, res: express.Response) => {
     try {
         const { txHex, userId, feeAmount } = req.body;
         if (!txHex) return res.status(400).json({ error: "Missing transaction hex" });
@@ -132,7 +132,7 @@ app.post('/api/v1/broadcast', validateApiKey, rateLimiters.broadcast.middleware(
     }
 });
 
-app.post('/api/v1/sponsor-universal', validateApiKey, rateLimiters.broadcast.middleware(), async (req: ApiKeyRequest, res: express.Response) => {
+app.post('/api/v1/sponsor-universal', validateApiKey, rateLimiters.broadcastIp.middleware(), rateLimiters.broadcast.middleware(), async (req: ApiKeyRequest, res: express.Response) => {
     try {
         const { projectId, txHex, intent, network } = req.body;
         if (!projectId) return res.status(400).json({ error: "Missing projectId" });

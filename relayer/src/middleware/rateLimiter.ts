@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import type { Redis } from 'ioredis';
 
 interface RateLimitStore {
     [key: string]: {
@@ -8,134 +9,260 @@ interface RateLimitStore {
 }
 
 interface RateLimitConfig {
-    windowMs: number;      // Time window in milliseconds
-    maxRequests: number;   // Max requests per window
-    message?: string;      // Custom error message
+    windowMs: number;
+    maxRequests: number;
+    message?: string;
 }
 
 /**
- * In-memory rate limiter for API key-based throttling
- * For production, consider using Redis for distributed rate limiting
+ * Rate limiter with optional Redis backend.
+ * Falls back to in-memory if Redis is unavailable or throws.
  */
 export class RateLimiter {
     private store: RateLimitStore = {};
     private config: RateLimitConfig;
+    private redisClient: Redis | null;
 
-    constructor(config: RateLimitConfig) {
+    constructor(config: RateLimitConfig, redisClient?: Redis | null) {
         this.config = {
-            windowMs: config.windowMs || 60000, // Default: 1 minute
-            maxRequests: config.maxRequests || 100, // Default: 100 requests/min
+            windowMs: config.windowMs || 60000,
+            maxRequests: config.maxRequests || 100,
             message: config.message || 'Too many requests, please try again later.'
         };
-
-        // Cleanup expired entries every minute
+        this.redisClient = redisClient || null;
         setInterval(() => this.cleanup(), 60000);
     }
 
-    /**
-     * Middleware function to rate limit requests per API key
-     */
+    private async getCountFromRedis(identifier: string): Promise<number | null> {
+        if (!this.redisClient) return null;
+        try {
+            const key = `ratelimit:key:${identifier}`;
+            const windowSeconds = Math.ceil(this.config.windowMs / 1000);
+            const count = await this.redisClient.incr(key);
+            if (count === 1) {
+                // First increment — set expiry for the window
+                await this.redisClient.expire(key, windowSeconds);
+            }
+            return count;
+        } catch {
+            return null; // Fall back to in-memory silently
+        }
+    }
+
     public middleware() {
-        return (req: Request & { apiKeyId?: string }, res: Response, next: NextFunction) => {
+        return async (req: Request & { apiKeyId?: string }, res: Response, next: NextFunction) => {
             const identifier = req.apiKeyId || req.ip || 'anonymous';
             const now = Date.now();
 
-            // Initialize or get existing record
+            // Try Redis first
+            const redisCount = await this.getCountFromRedis(identifier);
+            if (redisCount !== null) {
+                if (redisCount > this.config.maxRequests) {
+                    const windowSeconds = Math.ceil(this.config.windowMs / 1000);
+                    res.setHeader('X-RateLimit-Limit', this.config.maxRequests.toString());
+                    res.setHeader('X-RateLimit-Remaining', '0');
+                    res.setHeader('Retry-After', windowSeconds.toString());
+                    return res.status(429).json({
+                        error: 'Rate limit exceeded',
+                        message: this.config.message,
+                        retryAfter: windowSeconds
+                    });
+                }
+                res.setHeader('X-RateLimit-Limit', this.config.maxRequests.toString());
+                res.setHeader('X-RateLimit-Remaining', Math.max(0, this.config.maxRequests - redisCount).toString());
+                return next();
+            }
+
+            // In-memory fallback
             if (!this.store[identifier] || now > this.store[identifier].resetTime) {
-                this.store[identifier] = {
-                    count: 0,
-                    resetTime: now + this.config.windowMs
-                };
+                this.store[identifier] = { count: 0, resetTime: now + this.config.windowMs };
             }
 
             const record = this.store[identifier];
 
-            // Check if limit exceeded
             if (record.count >= this.config.maxRequests) {
                 const retryAfter = Math.ceil((record.resetTime - now) / 1000);
-                
                 res.setHeader('X-RateLimit-Limit', this.config.maxRequests.toString());
                 res.setHeader('X-RateLimit-Remaining', '0');
                 res.setHeader('X-RateLimit-Reset', record.resetTime.toString());
                 res.setHeader('Retry-After', retryAfter.toString());
-
                 return res.status(429).json({
                     error: 'Rate limit exceeded',
                     message: this.config.message,
-                    retryAfter: retryAfter
+                    retryAfter
                 });
             }
 
-            // Increment counter
             record.count++;
-
-            // Set rate limit headers
             res.setHeader('X-RateLimit-Limit', this.config.maxRequests.toString());
             res.setHeader('X-RateLimit-Remaining', (this.config.maxRequests - record.count).toString());
             res.setHeader('X-RateLimit-Reset', record.resetTime.toString());
-
             next();
         };
     }
 
-    /**
-     * Clean up expired entries from store
-     */
     private cleanup() {
         const now = Date.now();
         Object.keys(this.store).forEach(key => {
-            if (now > this.store[key].resetTime) {
-                delete this.store[key];
-            }
+            if (now > this.store[key].resetTime) delete this.store[key];
         });
     }
 
-    /**
-     * Reset rate limit for a specific identifier (useful for testing)
-     */
-    public reset(identifier: string) {
-        delete this.store[identifier];
+    public reset(identifier: string) { delete this.store[identifier]; }
+    public getStats(identifier: string) { return this.store[identifier] || null; }
+}
+
+/**
+ * IP-based rate limiter with optional Redis backend.
+ * Falls back to in-memory if Redis is unavailable or throws.
+ * Uses X-Forwarded-For when behind a proxy (Render, Vercel, etc.).
+ */
+export class IpRateLimiter {
+    private store: RateLimitStore = {};
+    private config: RateLimitConfig;
+    private redisClient: Redis | null;
+
+    constructor(config: RateLimitConfig, redisClient?: Redis | null) {
+        this.config = {
+            windowMs: config.windowMs || 60000,
+            maxRequests: config.maxRequests || 60,
+            message: config.message || 'Too many requests from this IP, please try again later.'
+        };
+        this.redisClient = redisClient || null;
+        setInterval(() => this.cleanup(), 60000);
     }
 
-    /**
-     * Get current stats for an identifier
-     */
-    public getStats(identifier: string) {
-        return this.store[identifier] || null;
+    private getIp(req: Request): string {
+        // Respect X-Forwarded-For when behind a reverse proxy
+        const forwarded = req.headers['x-forwarded-for'];
+        if (forwarded) {
+            const ips = (typeof forwarded === 'string' ? forwarded : forwarded[0]).split(',');
+            return ips[0].trim();
+        }
+        return req.ip || req.socket?.remoteAddress || 'unknown';
+    }
+
+    private async getCountFromRedis(ip: string): Promise<number | null> {
+        if (!this.redisClient) return null;
+        try {
+            const key = `ratelimit:ip:${ip}`;
+            const windowSeconds = Math.ceil(this.config.windowMs / 1000);
+            const count = await this.redisClient.incr(key);
+            if (count === 1) {
+                await this.redisClient.expire(key, windowSeconds);
+            }
+            return count;
+        } catch {
+            return null; // Fall back to in-memory silently
+        }
+    }
+
+    public middleware() {
+        return async (req: Request, res: Response, next: NextFunction) => {
+            const ip = this.getIp(req);
+            const now = Date.now();
+
+            // Try Redis first
+            const redisCount = await this.getCountFromRedis(ip);
+            if (redisCount !== null) {
+                if (redisCount > this.config.maxRequests) {
+                    const windowSeconds = Math.ceil(this.config.windowMs / 1000);
+                    res.setHeader('X-RateLimit-IP-Limit', this.config.maxRequests.toString());
+                    res.setHeader('X-RateLimit-IP-Remaining', '0');
+                    res.setHeader('Retry-After', windowSeconds.toString());
+                    return res.status(429).json({
+                        error: 'IP rate limit exceeded',
+                        message: this.config.message,
+                        retryAfter: windowSeconds
+                    });
+                }
+                res.setHeader('X-RateLimit-IP-Limit', this.config.maxRequests.toString());
+                res.setHeader('X-RateLimit-IP-Remaining', Math.max(0, this.config.maxRequests - redisCount).toString());
+                return next();
+            }
+
+            // In-memory fallback
+            if (!this.store[ip] || now > this.store[ip].resetTime) {
+                this.store[ip] = { count: 0, resetTime: now + this.config.windowMs };
+            }
+
+            const record = this.store[ip];
+
+            if (record.count >= this.config.maxRequests) {
+                const retryAfter = Math.ceil((record.resetTime - now) / 1000);
+                res.setHeader('X-RateLimit-IP-Limit', this.config.maxRequests.toString());
+                res.setHeader('X-RateLimit-IP-Remaining', '0');
+                res.setHeader('Retry-After', retryAfter.toString());
+                return res.status(429).json({
+                    error: 'IP rate limit exceeded',
+                    message: this.config.message,
+                    retryAfter
+                });
+            }
+
+            record.count++;
+            res.setHeader('X-RateLimit-IP-Limit', this.config.maxRequests.toString());
+            res.setHeader('X-RateLimit-IP-Remaining', (this.config.maxRequests - record.count).toString());
+            next();
+        };
+    }
+
+    private cleanup() {
+        const now = Date.now();
+        Object.keys(this.store).forEach(key => {
+            if (now > this.store[key].resetTime) delete this.store[key];
+        });
     }
 }
 
 /**
- * Create different rate limiters for different endpoint types
+ * Create rate limiters for all endpoint types.
+ * Passes the shared Redis client so limits persist across restarts.
  */
-export const createRateLimiters = () => {
+export const createRateLimiters = (redisClient?: import('ioredis').Redis | null) => {
     return {
-        // Strict limit for estimation endpoint (prevents abuse)
         estimate: new RateLimiter({
-            windowMs: 60000,        // 1 minute
-            maxRequests: 60,        // 60 requests per minute
+            windowMs: 60000,
+            maxRequests: 60,
             message: 'Too many fee estimation requests. Please slow down.'
-        }),
+        }, redisClient),
+        estimateIp: new IpRateLimiter({
+            windowMs: 60000,
+            maxRequests: 120,  // Higher than per-key since multiple keys can share an IP legitimately
+            message: 'Too many estimation requests from this IP.'
+        }, redisClient),
 
-        // Moderate limit for sponsorship endpoint (critical path)
         sponsor: new RateLimiter({
-            windowMs: 60000,        // 1 minute
-            maxRequests: 30,        // 30 transactions per minute
+            windowMs: 60000,
+            maxRequests: 30,
             message: 'Too many sponsorship requests. Please slow down.'
-        }),
+        }, redisClient),
+        sponsorIp: new IpRateLimiter({
+            windowMs: 60000,
+            maxRequests: 40,
+            message: 'Too many sponsorship requests from this IP.'
+        }, redisClient),
 
-        // Strict limit for broadcast endpoint (prevents transaction spam)
         broadcast: new RateLimiter({
-            windowMs: 60000,        // 1 minute
-            maxRequests: 20,        // 20 broadcasts per minute
+            windowMs: 60000,
+            maxRequests: 20,
             message: 'Too many broadcast requests. Please slow down.'
-        }),
+        }, redisClient),
+        broadcastIp: new IpRateLimiter({
+            windowMs: 60000,
+            maxRequests: 30,
+            message: 'Too many broadcast requests from this IP.'
+        }, redisClient),
 
-        // Lenient limit for dashboard endpoints
         dashboard: new RateLimiter({
-            windowMs: 60000,        // 1 minute
-            maxRequests: 120,       // 120 requests per minute
+            windowMs: 60000,
+            maxRequests: 120,
             message: 'Too many dashboard requests. Please slow down.'
-        })
+        }, redisClient),
+        dashboardIp: new IpRateLimiter({
+            windowMs: 60000,
+            maxRequests: 200,
+            message: 'Too many dashboard requests from this IP.'
+        }, redisClient)
     };
 };

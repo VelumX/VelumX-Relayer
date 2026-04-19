@@ -52,6 +52,12 @@ export class PaymasterService {
     private relayerKey: string;
     private pricingOracle: PricingOracleService;
 
+    // ── Item 1: Replay protection ─────────────────────────────────────────────
+    // Map<txHex, expiryTimestamp> — 24-hour TTL per entry
+    private processedTxHashes: Map<string, number> = new Map();
+    private readonly REPLAY_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+    // ─────────────────────────────────────────────────────────────────────────
+
     constructor() {
         this.mainnetNetwork = STACKS_MAINNET;
         this.testnetNetwork = STACKS_TESTNET;
@@ -64,7 +70,33 @@ export class PaymasterService {
         } else {
             console.log("Relayer Key initialized and sanitized for Universal Gas.");
         }
+
+        // Periodically evict expired replay-protection entries (every 30 minutes)
+        setInterval(() => this.cleanupReplayCache(), 30 * 60 * 1000);
     }
+
+    // ── Item 1: Replay cache helpers ──────────────────────────────────────────
+    private cleanupReplayCache(): void {
+        const now = Date.now();
+        for (const [key, expiry] of this.processedTxHashes) {
+            if (now > expiry) this.processedTxHashes.delete(key);
+        }
+    }
+
+    private isReplay(txHex: string): boolean {
+        const expiry = this.processedTxHashes.get(txHex);
+        if (expiry === undefined) return false;
+        if (Date.now() > expiry) {
+            this.processedTxHashes.delete(txHex);
+            return false;
+        }
+        return true;
+    }
+
+    private markProcessed(txHex: string): void {
+        this.processedTxHashes.set(txHex, Date.now() + this.REPLAY_TTL_MS);
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     /**
      * Get the correct Paymaster contract address for the target network
@@ -384,14 +416,144 @@ export class PaymasterService {
     }
 
     /**
+     * Item 6: Anomaly Detection — checks request rate for an API key over the last hour
+     * vs the 7-day average. Auto-suspends the key if the rate is anomalously high.
+     */
+    private async checkAnomalyAndSuspend(apiKeyId: string): Promise<void> {
+        try {
+            const now = new Date();
+
+            // Count txs in the last 7 days
+            const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            const weekCount = await (prisma.transaction as any).count({
+                where: { apiKeyId, createdAt: { gte: sevenDaysAgo } }
+            });
+
+            // 7-day average hourly rate
+            const avgRate = weekCount / 168;
+
+            // Skip anomaly check for new keys with no history
+            if (avgRate === 0) return;
+
+            // Count txs in the last hour
+            const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+            const currentRate = await (prisma.transaction as any).count({
+                where: { apiKeyId, createdAt: { gte: oneHourAgo } }
+            });
+
+            // Trigger only if current rate exceeds 10x average AND exceeds minimum threshold
+            if (currentRate > avgRate * 10 && currentRate > 10) {
+                console.warn(
+                    `[Anomaly] API key ${apiKeyId} suspended: ${currentRate} req/hr vs ${avgRate.toFixed(2)} avg/hr`
+                );
+                await (prisma.apiKey as any).update({
+                    where: { id: apiKeyId },
+                    data: { status: 'Suspended' }
+                });
+                throw new Error('API key suspended due to unusual activity. Please contact support.');
+            }
+        } catch (err: any) {
+            // Re-throw suspension errors; log and swallow DB/query errors
+            if (err.message?.includes('suspended due to unusual activity')) throw err;
+            console.warn('[Anomaly] Check failed (non-blocking):', err.message);
+        }
+    }
+
+    /**
      * Sponsor a raw Stacks transaction hex
      */
     public async sponsorRawTransaction(txHex: string, apiKeyId: string, userId: string, reportedFee?: string) {
         const activeKey = userId ? this.getUserRelayerKey(userId) : this.relayerKey;
         if (!activeKey) throw new Error("Relayer key not configured");
 
+        // Item 1: Replay protection — reject duplicate tx hex within 24 hours
+        const cleanHex = txHex.replace(/^0x/, '');
+        if (this.isReplay(cleanHex)) {
+            throw new Error('Transaction already processed (replay detected)');
+        }
+
+        // ── Policy enforcement for DEVELOPER_SPONSORS ─────────────────────────
+        // Check maxSponsoredTxsPerUser and monthlyLimitUsd before processing.
         try {
-            const cleanHex = txHex.replace(/^0x/, '');
+            const apiKey = await (prisma.apiKey as any).findUnique({
+                where: { id: apiKeyId },
+                select: {
+                    sponsorshipPolicy: true,
+                    maxSponsoredTxsPerUser: true,
+                    monthlyLimitUsd: true,
+                }
+            });
+
+            if (apiKey?.sponsorshipPolicy === 'DEVELOPER_SPONSORS') {
+                // 1. Per-user tx limit
+                if (apiKey.maxSponsoredTxsPerUser && apiKey.maxSponsoredTxsPerUser > 0) {
+                    // Extract sender address from tx hex for per-user counting
+                    let senderAddr = 'unknown';
+                    try {
+                        const tx = deserializeTransaction(cleanHex);
+                        const auth = (tx.auth as any);
+                        if (auth.originAddress) senderAddr = auth.originAddress;
+                        else if (auth.spendingCondition?.signer) senderAddr = auth.spendingCondition.signer;
+                    } catch {}
+
+                    if (senderAddr !== 'unknown') {
+                        const userTxCount = await (prisma.transaction as any).count({
+                            where: {
+                                apiKeyId,
+                                userAddress: senderAddr,
+                                status: { notIn: ['Failed'] }
+                            }
+                        });
+                        if (userTxCount >= apiKey.maxSponsoredTxsPerUser) {
+                            throw new Error(
+                                `Sponsorship limit reached: this user has already used ${userTxCount} of ${apiKey.maxSponsoredTxsPerUser} sponsored transactions.`
+                            );
+                        }
+                    }
+                }
+
+                // 2. Monthly USD spend limit (Item 5: use actual tx count from DB)
+                if (apiKey.monthlyLimitUsd && apiKey.monthlyLimitUsd > 0) {
+                    const startOfMonth = new Date();
+                    startOfMonth.setDate(1);
+                    startOfMonth.setHours(0, 0, 0, 0);
+
+                    // Use actual count of non-failed txs this month for accurate spend tracking
+                    const monthlyTxCount = await (prisma.transaction as any).count({
+                        where: {
+                            apiKeyId,
+                            createdAt: { gte: startOfMonth },
+                            status: { notIn: ['Failed'] }
+                        }
+                    });
+
+                    // Each sponsored tx costs 0.005 STX (5000 microSTX)
+                    const STX_PER_TX = 0.005;
+                    const stxPrice = await this.pricingOracle.getStxPrice() || 0;
+                    const actualMonthlySpendUsd = monthlyTxCount * STX_PER_TX * stxPrice;
+
+                    if (actualMonthlySpendUsd >= apiKey.monthlyLimitUsd) {
+                        throw new Error(
+                            `Monthly sponsorship budget of ` USD has been reached. ` +
+                            `Actual spend this month: ` USD (` txs).`
+                        );
+                    }
+                }
+            }
+            }
+        } catch (policyErr: any) {
+            // Re-throw policy violations; log and continue for DB/config errors
+            if (policyErr.message?.includes('limit') || policyErr.message?.includes('budget')) {
+                throw policyErr;
+            }
+            console.warn('Relayer: Policy check failed (non-blocking):', policyErr.message);
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
+
+        // Item 6: Anomaly detection — auto-suspend keys with unusual traffic spikes
+        await this.checkAnomalyAndSuspend(apiKeyId);
+        try {
             const transaction = deserializeTransaction(cleanHex);
 
             // Guard: transaction MUST have AuthType.Sponsored (0x05)
@@ -521,6 +683,9 @@ export class PaymasterService {
             }
 
             const txid = response.txid;
+
+            // Item 1: Mark this tx as processed to prevent replay
+            this.markProcessed(cleanHex);
 
             // Save to Database
             try {
