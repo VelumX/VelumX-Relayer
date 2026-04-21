@@ -18,6 +18,7 @@ import { StacksNetwork, STACKS_MAINNET, STACKS_TESTNET } from '@stacks/network';
 import { PrismaClient } from '@prisma/client';
 import crypto from 'node:crypto';
 import { PricingOracleService } from './services/PricingOracleService.js';
+import { getRedisClient } from './services/RedisClient.js';
 
 const prisma = new PrismaClient();
 
@@ -418,24 +419,40 @@ export class PaymasterService {
     /**
      * Item 6: Anomaly Detection — checks request rate for an API key over the last hour
      * vs the 7-day average. Auto-suspends the key if the rate is anomalously high.
+     *
+     * Optimizations:
+     * - 7-day average is cached in Redis for 1 hour (avoids expensive weekly count on every request)
+     * - Called fire-and-forget (no await) so it doesn't add latency to the broadcast path
      */
     private async checkAnomalyAndSuspend(apiKeyId: string): Promise<void> {
         try {
             const now = new Date();
+            const redis = getRedisClient();
+            const cacheKey = `anomaly:avg:${apiKeyId}`;
 
-            // Count txs in the last 7 days
-            const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-            const weekCount = await (prisma.transaction as any).count({
-                where: { apiKeyId, createdAt: { gte: sevenDaysAgo } }
-            });
+            // Get 7-day average from Redis cache, or compute and cache it
+            let avgRate: number;
+            const cached = redis ? await redis.get(cacheKey).catch(() => null) : null;
 
-            // 7-day average hourly rate
-            const avgRate = weekCount / 168;
+            if (cached !== null && cached !== undefined) {
+                avgRate = parseFloat(cached);
+            } else {
+                const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                const weekCount = await (prisma.transaction as any).count({
+                    where: { apiKeyId, createdAt: { gte: sevenDaysAgo } }
+                });
+                avgRate = weekCount / 168;
+
+                // Cache for 1 hour — no need to recompute on every request
+                if (redis) {
+                    await redis.set(cacheKey, avgRate.toString(), 'EX', 3600).catch(() => {});
+                }
+            }
 
             // Skip anomaly check for new keys with no history
             if (avgRate === 0) return;
 
-            // Count txs in the last hour
+            // Count txs in the last hour (always fresh — this is the signal we're checking)
             const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
             const currentRate = await (prisma.transaction as any).count({
                 where: { apiKeyId, createdAt: { gte: oneHourAgo } }
@@ -450,11 +467,10 @@ export class PaymasterService {
                     where: { id: apiKeyId },
                     data: { status: 'Suspended' }
                 });
-                throw new Error('API key suspended due to unusual activity. Please contact support.');
+                // Invalidate the cache so the next check recomputes from scratch
+                if (redis) await redis.del(cacheKey).catch(() => {});
             }
         } catch (err: any) {
-            // Re-throw suspension errors; log and swallow DB/query errors
-            if (err.message?.includes('suspended due to unusual activity')) throw err;
             console.warn('[Anomaly] Check failed (non-blocking):', err.message);
         }
     }
@@ -550,8 +566,9 @@ export class PaymasterService {
         // ─────────────────────────────────────────────────────────────────────
 
 
-        // Item 6: Anomaly detection — auto-suspend keys with unusual traffic spikes
-        await this.checkAnomalyAndSuspend(apiKeyId);
+        // Item 6: Anomaly detection — fire-and-forget, doesn't block the broadcast path.
+        // Suspension takes effect on the next request, not this one.
+        this.checkAnomalyAndSuspend(apiKeyId).catch(() => {});
         try {
             const transaction = deserializeTransaction(cleanHex);
 
