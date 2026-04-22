@@ -98,26 +98,13 @@ app.post('/api/v1/estimate', validateApiKey, rateLimiters.estimateIp.middleware(
         const relayerKey = paymasterService.getUserRelayerKey(req.userId!);
         const relayerAddress = getAddressFromPrivateKey(relayerKey.replace(/^0x/, ''), targetNetwork);
         const paymasterAddress = paymasterService.getPaymasterAddress(targetNetwork);
-        const registryAddress = paymasterService.getRegistryAddress(targetNetwork);
-        res.json({ ...estimation, relayerAddress, paymasterAddress, registryAddress });
+        res.json({ ...estimation, relayerAddress, paymasterAddress });
     } catch (error: any) {
         console.error("Estimation Error:", error);
         res.status(500).json({ error: error.message });
     }
 });
 
-app.post('/api/v1/sponsor', validateApiKey, rateLimiters.sponsorIp.middleware(), rateLimiters.sponsor.middleware(), async (req: ApiKeyRequest, res: express.Response) => {
-    try {
-        const { intent } = req.body;
-        if (!intent || !intent.signature) return res.status(400).json({ error: "Missing signed intent" });
-        const result = await paymasterService.sponsorIntent(intent, req.apiKeyId, req.userId);
-        if (req.userId) await invalidateStatsCache(req.userId);
-        res.json(result);
-    } catch (error: any) {
-        console.error("Sponsorship Error:", error);
-        res.status(500).json({ error: error.message });
-    }
-});
 
 app.post('/api/v1/broadcast', validateApiKey, rateLimiters.broadcastIp.middleware(), rateLimiters.broadcast.middleware(), async (req: ApiKeyRequest, res: express.Response) => {
     try {
@@ -132,27 +119,6 @@ app.post('/api/v1/broadcast', validateApiKey, rateLimiters.broadcastIp.middlewar
     }
 });
 
-app.post('/api/v1/sponsor-universal', validateApiKey, rateLimiters.broadcastIp.middleware(), rateLimiters.broadcast.middleware(), async (req: ApiKeyRequest, res: express.Response) => {
-    try {
-        const { projectId, txHex, intent, network } = req.body;
-        if (!projectId) return res.status(400).json({ error: "Missing projectId" });
-        if (!txHex) return res.status(400).json({ error: "Missing transaction hex" });
-        if (!intent) return res.status(400).json({ error: "Missing intent" });
-
-        const result = await paymasterService.sponsorUniversalCall({
-            projectId,
-            txHex,
-            intent,
-            network: network || 'mainnet'
-        });
-
-        if (req.userId) await invalidateStatsCache(req.userId);
-        res.json(result);
-    } catch (error: any) {
-        console.error("Universal Sponsorship Error:", error);
-        res.status(500).json({ error: error.message });
-    }
-});
 
 app.get('/api/dashboard/export-key', verifySupabaseToken, async (req: AuthRequest, res: express.Response) => {
     try {
@@ -165,8 +131,6 @@ app.get('/api/dashboard/export-key', verifySupabaseToken, async (req: AuthReques
             testnetAddress: getAddr(key, 'testnet'),
             paymasterMainnet: paymasterService.getPaymasterAddress('mainnet'),
             paymasterTestnet: paymasterService.getPaymasterAddress('testnet'),
-            registryMainnet: paymasterService.getRegistryAddress('mainnet'),
-            registryTestnet: paymasterService.getRegistryAddress('testnet'),
             key
         });
     } catch (error: any) {

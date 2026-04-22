@@ -1,17 +1,7 @@
 import {
-    makeContractCall,
     broadcastTransaction,
-    AnchorMode,
-    PostConditionMode,
-    uintCV,
-    principalCV,
-    someCV,
-    noneCV,
-    bufferCV,
-    listCV,
     deserializeTransaction,
     sponsorTransaction,
-    Cl,
     getAddressFromPrivateKey,
 } from '@stacks/transactions';
 import { StacksNetwork, STACKS_MAINNET, STACKS_TESTNET } from '@stacks/network';
@@ -36,16 +26,6 @@ const KNOWN_TOKEN_CONTRACTS: Record<string, string> = {
     'sbtc-token': 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token',
 };
 
-// Simple interface matching the SDK
-interface SignedIntent {
-    target: string;
-    payload: string; // Packed transaction buffer
-    maxFee: string | number;
-    feeToken?: string; // New: Supports Universal Token Gas
-    nonce: string | number;
-    signature: string;
-    network?: 'mainnet' | 'testnet'; // Optional network flag
-}
 
 export class PaymasterService {
     private mainnetNetwork: StacksNetwork;
@@ -100,29 +80,24 @@ export class PaymasterService {
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * Get the correct Paymaster contract address for the target network
+     * Get the correct Paymaster contract address for the target network.
+     * The VelumX DeFi Paymaster v1 is the reference implementation.
+     * Developers deploy their own paymaster contracts for USER_PAYS integrations.
      */
-    public getPaymasterAddress(network: 'mainnet' | 'testnet', version: 'v1' | 'v4' | 'v5' | 'relayer-v1' = 'relayer-v1'): string {
+    public getPaymasterAddress(network: 'mainnet' | 'testnet'): string {
         if (network === 'mainnet') {
-            if (version === 'v4') return process.env.PAYMASTER_CONTRACT_MAINNET || 'SPKYNF473GQ1V0WWCF24TV7ZR1WYAKTC7AM8QGBW.simple-paymaster-v4';
-            if (version === 'v5') return process.env.PAYMASTER_V5_MAINNET || 'SPKYNF473GQ1V0WWCF24TV7ZR1WYAKTC7AM8QGBW.universal-paymaster-v5';
-            if (version === 'v1') return process.env.PAYMASTER_V1_MAINNET || 'SPKYNF473GQ1V0WWCF24TV7ZR1WYAKTC7AM8QGBW.velumx-paymaster-1-1';
-            return process.env.PAYMASTER_RELAYER_V1_MAINNET || 'SPKYNF473GQ1V0WWCF24TV7ZR1WYAKTC7AM8QGBW.velumx-relayer-1';
+            return process.env.PAYMASTER_CONTRACT_MAINNET || 'SPKYNF473GQ1V0WWCF24TV7ZR1WYAKTC7AM8QGBW.velumx-defi-paymaster-v1';
         }
-        if (version === 'v4') return process.env.PAYMASTER_CONTRACT_TESTNET || 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.simple-paymaster-v4';
-        if (version === 'v5') return process.env.PAYMASTER_V5_TESTNET || 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.universal-paymaster-v5';
-        if (version === 'v1') return process.env.PAYMASTER_V1_TESTNET || 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.velumx-paymaster-1';
-        return process.env.PAYMASTER_RELAYER_V1_TESTNET || 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.velumx-relayer-1';
+        return process.env.PAYMASTER_CONTRACT_TESTNET || 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.velumx-defi-paymaster-v1';
     }
 
     /**
-     * Get the Registry v1 contract address for the target network
+     * Get the developer's relayer address for the current network.
+     * @deprecated Registry is no longer used. Use getPaymasterAddress() instead.
      */
     public getRegistryAddress(network: 'mainnet' | 'testnet'): string {
-        if (network === 'mainnet') {
-            return process.env.REGISTRY_V1_MAINNET || 'SPKYNF473GQ1V0WWCF24TV7ZR1WYAKTC7AM8QGBW.velumx-registry-v1';
-        }
-        return process.env.REGISTRY_V1_TESTNET || 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.velumx-registry-v1';
+        // No registry in the new architecture — return empty string for backward compat
+        return '';
     }
 
 
@@ -332,92 +307,8 @@ export class PaymasterService {
         };
     }
 
-    public async sponsorIntent(intent: SignedIntent, apiKeyId?: string, userId?: string) {
-        const activeKey = userId ? this.getUserRelayerKey(userId) : this.relayerKey;
-
-        if (!activeKey) throw new Error("Relayer key not configured");
-        if (!intent.feeToken) throw new Error("Universal Gas: feeToken is required");
-
-        console.log("Relayer: Processing account-abstraction intent", {
-            target: intent.target,
-            token: intent.feeToken,
-            tenant: userId || 'MASTER'
-        });
-
-        const targetNetwork = intent.network || (process.env.NETWORK as 'mainnet' | 'testnet') || 'mainnet';
-
-        // Perform balance validation to prevent relayer wasting gas
-        const hasBalance = await this.validateUserBalance(intent.target, intent.feeToken, BigInt(intent.maxFee), targetNetwork);
-        if (!hasBalance) {
-            throw new Error(`Insufficient ${intent.feeToken} balance in user wallet to cover the paymaster fee.`);
-        }
-        const stxNetwork = targetNetwork === 'mainnet' ? this.mainnetNetwork : this.testnetNetwork;
-        const paymasterAddress = this.getPaymasterAddress(targetNetwork, 'v4'); // Legacy intents use v4
-        const [contractAddress, contractName] = paymasterAddress.split('.');
-
-        const feeTokenPrincipal = intent.feeToken;
-
-        const txOptions = {
-            contractAddress,
-            contractName,
-            functionName: 'call-gasless',
-            functionArgs: [
-                principalCV(feeTokenPrincipal),
-                uintCV(intent.maxFee),
-                principalCV(getAddressFromPrivateKey(activeKey, targetNetwork)), // Dynamic Relayer receiver
-                principalCV(intent.target),
-                Cl.stringAscii('universal-execute'),
-                bufferCV(Buffer.from(intent.payload.replace(/^0x/, ''), 'hex'))
-            ],
-            senderKey: activeKey,
-            validateWithAbi: false,
-            network: stxNetwork,
-            anchorMode: AnchorMode.Any,
-            postConditionMode: PostConditionMode.Allow,
-            fee: 5000n, // 0.005 STX (microSTX)
-        };
-
-        try {
-            const transaction = await makeContractCall(txOptions);
-            const response = await broadcastTransaction({ transaction, network: stxNetwork });
-
-            if ('error' in response) {
-                const errorMsg = response.reason || (response as any).message || JSON.stringify(response);
-                throw new Error(`Intent broadcast failed: ${errorMsg}`);
-            }
-
-            const txid = response.txid;
-
-            // Save to Database with Multi-tenant association
-            try {
-                // Resolve feeToken to full principal for accurate decimal resolution later
-                const resolvedFeeToken = KNOWN_TOKEN_CONTRACTS[intent.feeToken] || intent.feeToken;
-                await (prisma.transaction as any).create({
-                    data: {
-                        txid,
-                        type: 'Intent Sponsorship',
-                        userAddress: intent.target,
-                        feeAmount: intent.maxFee.toString(),
-                        feeToken: resolvedFeeToken,
-                        status: 'Pending',
-                        network: targetNetwork,
-                        userId: userId || null,
-                        apiKeyId: apiKeyId || null
-                    }
-                });
-            } catch (dbError) {
-                console.error("Failed to save transaction to DB:", dbError);
-            }
-
-            return { txid, status: "sponsored" };
-        } catch (error: any) {
-            console.error("Relayer: Intent sponsorship error", error);
-            throw error;
-        }
-    }
-
     /**
-     * Item 6: Anomaly Detection — checks request rate for an API key over the last hour
+     * Anomaly Detection — checks request rate for an API key over the last hour
      * vs the 7-day average. Auto-suspends the key if the rate is anomalously high.
      *
      * Optimizations:
@@ -736,119 +627,4 @@ export class PaymasterService {
         }
     }
 
-    /**
-     * Universal Sponsorship Flow:
-     * 1. Sponsors an arbitrary Stacks transaction using the Project's derived Relayer Key.
-     * 2. Calls the Universal Paymaster v1 contract to settle the SIP-010 fee.
-     */
-    public async sponsorUniversalCall(params: {
-        projectId: string; // UUID from DB
-        txHex: string;     // User-signed transaction
-        intent: {
-            user: string;
-            userPubKey: string;
-            token: string;
-            amount: string;
-            expiration: number;
-            nonce: number;
-            signature: string;
-        };
-        network?: 'mainnet' | 'testnet';
-    }) {
-        const { projectId, txHex, intent } = params;
-        const targetNetwork = params.network || (process.env.NETWORK as 'mainnet' | 'testnet') || 'mainnet';
-        const stxNetwork = targetNetwork === 'mainnet' ? this.mainnetNetwork : this.testnetNetwork;
-
-        // 1. Derive the Project's unique Relayer Key
-        const projectRelayerKey = this.getUserRelayerKey(projectId);
-        const projectRelayerAddress = getAddressFromPrivateKey(projectRelayerKey, targetNetwork);
-
-        console.log(`[Universal] Sponsoring for project ${projectId} using relayer ${projectRelayerAddress}`);
-
-        try {
-            // 2. Deserialize and Sponsor the Transaction
-            const transaction = deserializeTransaction(txHex.replace(/^0x/, ''));
-            
-            // Check if it's already a sponsored transaction structure
-            const authType = (transaction.auth as any).authType;
-            if (authType !== 0x05) {
-                throw new Error("Transaction must be initialized as sponsored (sponsored: true in SDK)");
-            }
-
-            // Minimal Mainnet Fee: 0.005 STX (5000 microSTX)
-            const MINIMAL_FEE = 5000n;
-
-            const signedTx = await sponsorTransaction({
-                transaction,
-                sponsorPrivateKey: projectRelayerKey,
-                network: stxNetwork,
-                fee: MINIMAL_FEE,
-            });
-
-            // 3. Broadcast
-            const broadcastResponse = await broadcastTransaction({ transaction: signedTx, network: stxNetwork });
-            if ('error' in broadcastResponse) {
-                throw new Error(`Sponsorship broadcast failed: ${JSON.stringify(broadcastResponse)}`);
-            }
-
-            const txid = broadcastResponse.txid;
-            console.log(`[Universal] Transaction sponsored: ${txid}`);
-
-            // 4. Settlement (On-chain SIP-010 transfer)
-            // The settlement is called by the Project Relayer
-            // to move SIP-010 from the user's balance in the contract to the project relayer.
-            await this.executeSettlement({
-                projectRelayerKey,
-                intent,
-                txid,
-                network: targetNetwork
-            });
-
-            return { txid, status: "sponsored" };
-        } catch (error: any) {
-            console.error("[Universal] Error:", error);
-            throw error;
-        }
-    }
-
-    private async executeSettlement(params: {
-        projectRelayerKey: string;
-        intent: any;
-        txid: string;
-        network: 'mainnet' | 'testnet';
-    }) {
-        const { projectRelayerKey, intent, txid, network } = params;
-        const stxNetwork = network === 'mainnet' ? this.mainnetNetwork : this.testnetNetwork;
-        
-        const contractFull = this.getPaymasterAddress(network, 'v1'); 
-        const [contractAddress, contractName] = contractFull.split('.');
-
-        const txOptions = {
-            contractAddress,
-            contractName,
-            functionName: 'settle',
-            functionArgs: [
-                principalCV(intent.user),
-                bufferCV(Buffer.from(intent.userPubKey, 'hex')),
-                principalCV(intent.token),
-                uintCV(intent.amount),
-                uintCV(intent.expiration),
-                uintCV(intent.nonce),
-                bufferCV(Buffer.from(intent.signature, 'hex')),
-                bufferCV(Buffer.from(txid.replace(/^0x/, ''), 'hex'))
-            ],
-            senderKey: projectRelayerKey, // The project's relayer address calls this to get paid
-            network: stxNetwork,
-            anchorMode: AnchorMode.Any,
-            postConditionMode: PostConditionMode.Allow,
-        };
-
-        try {
-            const transaction = await makeContractCall(txOptions);
-            const response = await broadcastTransaction({ transaction, network: stxNetwork });
-            console.log(`[Settlement] Settlement broadcasted for ${txid}: ${JSON.stringify(response)}`);
-        } catch (error) {
-            console.error("[Settlement] Failed:", error);
-        }
-    }
 }

@@ -1,35 +1,69 @@
-import { uintCV, principalCV, bufferCV, someCV, noneCV, Cl } from '@stacks/transactions';
 import {
-    NetworkConfig, SponsorshipOptions, FeeEstimateResult, SponsorResult,
-    SwapParams, BridgeParams, TransferParams, AddLiquidityParams,
-    RemoveLiquidityParams, StakeParams
+    makeUnsignedContractCall,
+    PostConditionMode,
+} from '@stacks/transactions';
+import {
+    NetworkConfig,
+    SponsorOptions,
+    FeeEstimateResult,
+    SponsorResult,
+    ContractCallParams,
+    RelayerError,
 } from './types';
 
 /**
  * VelumXClient — The core SDK for integrating VelumX gasless sponsorship.
+ *
+ * VelumX is a Relayer-as-a-Service platform. You build the transaction,
+ * VelumX sponsors the STX gas fee.
+ *
+ * @example
+ * ```ts
+ * const velumx = new VelumXClient({
+ *   paymasterUrl: '/api/velumx/proxy',
+ *   network: 'mainnet',
+ * });
+ *
+ * // DEVELOPER_SPONSORS: user pays nothing
+ * const { txid } = await velumx.sponsor(signedTxHex);
+ *
+ * // USER_PAYS: user pays fee in SIP-010 token
+ * const estimate = await velumx.estimateFee({ feeToken: 'SP...aeusdc' });
+ * const { txid } = await velumx.sponsor(signedTxHex, {
+ *   feeToken: estimate.feeToken,
+ *   feeAmount: estimate.maxFee,
+ * });
+ * ```
  */
 export class VelumXClient {
     private config: NetworkConfig;
     private relayerUrl: string;
 
     constructor(config: NetworkConfig) {
-        if (!config.apiKey && !config.paymasterUrl?.includes('/api/velumx/proxy')) {
-            throw new Error(
-                'VelumX: API Key is required. Get yours at the VelumX Developer Dashboard.'
-            );
-        }
         this.config = config;
         this.relayerUrl = config.paymasterUrl || 'https://api.velumx.xyz/api/v1';
     }
 
     /**
      * Estimate the gas fee for a transaction in a specific SIP-010 token.
+     *
+     * Returns the fee amount, policy (DEVELOPER_SPONSORS or USER_PAYS),
+     * and the relayer address to use as fee recipient in paymaster calls.
+     *
+     * @example
+     * ```ts
+     * const estimate = await velumx.estimateFee({
+     *   feeToken: 'SP2C2YFP12AJZB4MABJBAJ55XECVS7E4PMMZ89YZR.aeusdc',
+     *   estimatedGas: 200_000,
+     * });
+     * // { maxFee: '250000', policy: 'USER_PAYS', relayerAddress: 'SP...' }
+     * ```
      */
     public async estimateFee(params: {
-        feeToken: string;
+        feeToken?: string;
         estimatedGas?: number;
     }): Promise<FeeEstimateResult> {
-        const { feeToken, estimatedGas = 150000 } = params;
+        const { feeToken, estimatedGas = 150_000 } = params;
 
         const response = await fetch(`${this.relayerUrl}/estimate`, {
             method: 'POST',
@@ -38,23 +72,41 @@ export class VelumXClient {
                 intent: {
                     feeToken,
                     estimatedGas,
-                    network: this.config.network
-                }
-            })
+                    network: this.config.network,
+                },
+            }),
         });
 
         if (!response.ok) {
             const err = await response.json().catch(() => ({ error: response.statusText })) as any;
-            throw new Error(`Fee estimation failed: ${err.error || err.message || response.statusText}`);
+            throw new RelayerError(err.error || err.message || response.statusText);
         }
 
         return response.json() as Promise<FeeEstimateResult>;
     }
 
     /**
-     * Sponsor a signed Stacks transaction — the relayer pays the STX network fee.
+     * Sponsor a signed Stacks transaction — the VelumX relayer pays the STX network fee.
+     *
+     * For DEVELOPER_SPONSORS: omit feeToken and feeAmount.
+     * For USER_PAYS: include feeToken and feeAmount from estimateFee().
+     *
+     * @example DEVELOPER_SPONSORS
+     * ```ts
+     * const { txid } = await velumx.sponsor(signedTxHex);
+     * ```
+     *
+     * @example USER_PAYS
+     * ```ts
+     * const { txid } = await velumx.sponsor(signedTxHex, {
+     *   feeToken: 'SP...aeusdc',
+     *   feeAmount: '250000',
+     * });
+     * ```
+     *
+     * @throws {RelayerError} if the relayer rejects the transaction
      */
-    public async sponsor(txHex: string, options?: SponsorshipOptions): Promise<SponsorResult> {
+    public async sponsor(txHex: string, options?: SponsorOptions): Promise<SponsorResult> {
         const response = await fetch(`${this.relayerUrl}/broadcast`, {
             method: 'POST',
             headers: this.headers(),
@@ -63,13 +115,13 @@ export class VelumXClient {
                 feeToken: options?.feeToken,
                 feeAmount: options?.feeAmount,
                 userId: options?.userId,
-                network: options?.network || this.config.network
-            })
+                network: options?.network || this.config.network,
+            }),
         });
 
         if (!response.ok) {
             const err = await response.json().catch(() => ({ error: response.statusText })) as any;
-            throw new Error(`Sponsorship failed: ${err.error || err.message || response.statusText}`);
+            throw new RelayerError(err.error || err.message || response.statusText);
         }
 
         return response.json() as Promise<SponsorResult>;
@@ -85,7 +137,7 @@ export class VelumXClient {
     }> {
         const response = await fetch(`${this.relayerUrl}/config`, {
             method: 'GET',
-            headers: this.headers()
+            headers: this.headers(),
         });
 
         if (!response.ok) {
@@ -95,286 +147,77 @@ export class VelumXClient {
         return response.json();
     }
 
-    /**
-     * Get the ContractCall options for a gasless Swap via the v5 paymaster.
-     */
-    public getSwapOptions(params: SwapParams) {
-        return this.getExecuteGenericOptions({ ...params, actionId: params.actionId || 'swap', version: 'v5' });
-    }
-
-    /**
-     * Get the ContractCall options for a gasless Bridge via the v5 paymaster.
-     */
-    public getBridgeOptions(params: BridgeParams) {
-        return this.getExecuteGenericOptions({ ...params, actionId: params.actionId || 'bridge', version: 'v5' });
-    }
-
-    /**
-     * Get the ContractCall options for a gasless Transfer via the v5 paymaster.
-     */
-    public getTransferOptions(params: TransferParams) {
-        return this.getExecuteGenericOptions({ ...params, actionId: params.actionId || 'transfer', version: 'v5' });
-    }
-
-    /**
-     * Get the ContractCall options for gasless Add Liquidity via the v5 paymaster.
-     */
-    public getAddLiquidityOptions(params: AddLiquidityParams) {
-        return this.getExecuteGenericOptions({ ...params, actionId: params.actionId || 'add-liquidity', version: 'v5' });
-    }
-
-    /**
-     * Get the ContractCall options for gasless Remove Liquidity via the v5 paymaster.
-     */
-    public getRemoveLiquidityOptions(params: RemoveLiquidityParams) {
-        return this.getExecuteGenericOptions({ ...params, actionId: params.actionId || 'remove-liquidity', version: 'v5' });
-    }
-
-    /**
-     * Get the ContractCall options for gasless Staking/Stacking via the v5 paymaster.
-     */
-    public getStakeOptions(params: StakeParams) {
-        return this.getExecuteGenericOptions({ ...params, actionId: params.actionId || 'stake', version: 'v5' });
-    }
-
-    /**
-     * Get the ContractCall options for a Velar Swap via the VelumX Paymaster.
-     * Use this with @stacks/connect's openContractCall().
-     */
-    public getVelarSwapOptions(params: {
-        poolId: number;
-        token0: string;
-        token1: string;
-        tokenIn: string;
-        tokenOut: string;
-        dx: string | number;
-        minDy: string | number;
-        feeAmount: string | number;
-        feeToken: string;
-        relayer: string;
-    }) {
-        const paymaster = this.getPaymasterAddress(this.config.network);
-        const [contractAddress, contractName] = paymaster.split('.');
-
-        return {
-            contractAddress,
-            contractName,
-            functionName: 'swap-velar-gasless',
-            functionArgs: [
-                uintCV(params.poolId),
-                principalCV(params.token0),
-                principalCV(params.token1),
-                principalCV(params.tokenIn),
-                principalCV(params.tokenOut),
-                uintCV(params.dx),
-                uintCV(params.minDy),
-                uintCV(params.feeAmount),
-                principalCV(params.relayer),
-                principalCV(params.feeToken)
-            ],
-            sponsored: true,
-            network: this.config.network
-        };
-    }
-
-    /**
-     * Get the ContractCall options for an ALEX Swap via the VelumX Paymaster.
-     * Supports ALEX amm-pool-v2-01.
-     */
-    public getAlexSwapOptions(params: {
-        tokenX: string;
-        tokenY: string;
-        factor: string | number;
-        dx: string | number;
-        minDy?: string | number;
-        feeAmount: string | number;
-        feeToken: string;
-        relayer: string;
-    }) {
-        const paymaster = this.getPaymasterAddress(this.config.network);
-        const [contractAddress, contractName] = paymaster.split('.');
-
-        return {
-            contractAddress,
-            contractName,
-            functionName: 'swap-gasless',
-            functionArgs: [
-                principalCV(params.tokenX),
-                principalCV(params.tokenY),
-                uintCV(params.factor),
-                uintCV(params.dx),
-                params.minDy ? someCV(uintCV(params.minDy)) : noneCV(),
-                uintCV(params.feeAmount),
-                principalCV(params.relayer),
-                principalCV(params.feeToken)
-            ],
-            sponsored: true,
-            network: this.config.network
-        };
-    }
-
-    /**
-     * Get the ContractCall options for a Universal Action via the VelumX Paymaster v5.
-     * Use this with @stacks/connect's openContractCall().
-     */
-    public getExecuteGenericOptions(params: {
-        projectId?: string;
-        actionId?: string;
-        executor: string;
-        payload: string | Uint8Array;
-        feeAmount: string | number;
-        feeToken: string;
-        relayer?: string;
-        version?: 'v1' | 'v4' | 'v5' | 'relayer-v1';
-        token1?: string;
-        token2?: string;
-        token3?: string;
-        token4?: string;
-    }) {
-        const paymaster = this.getPaymasterAddress(this.config.network, params.version || 'relayer-v1');
-        const [contractAddress, contractName] = paymaster.split('.');
-
-        let payloadBuffer: Uint8Array;
-        if (typeof params.payload === 'string') {
-             payloadBuffer = Buffer.from(params.payload.replace(/^0x/, ''), 'hex');
-        } else {
-             payloadBuffer = params.payload;
-        }
-
-        let functionArgs;
-        
-        if (params.version === 'v5' || params.version === 'v4') {
-            functionArgs = [
-                principalCV(params.projectId || this.getRegistryAddress()),
-                Cl.stringAscii(params.actionId || 'generic'),
-                principalCV(params.executor),
-                bufferCV(payloadBuffer),
-                uintCV(params.feeAmount),
-                principalCV(params.feeToken)
-            ];
-        } else {
-            // relayer-v1 architecture (Trait-Forwarding)
-            functionArgs = [
-                principalCV(params.executor),
-                bufferCV(payloadBuffer),
-                uintCV(params.feeAmount),
-                principalCV(params.relayer || this.getRegistryAddress()), 
-                principalCV(params.feeToken),
-                params.token1 ? someCV(principalCV(params.token1)) : noneCV(),
-                params.token2 ? someCV(principalCV(params.token2)) : noneCV(),
-                params.token3 ? someCV(principalCV(params.token3)) : noneCV(),
-                params.token4 ? someCV(principalCV(params.token4)) : noneCV(),
-            ];
-        }
-
-        return {
-            contractAddress,
-            contractName,
-            functionName: 'execute-action-generic',
-            functionArgs,
-            sponsored: true,
-            network: this.config.network
-        };
-    }
-
-    /**
-     * Get the ContractCall options for a Universal Action via a developer's Adapter (Legacy v4).
-     */
-    public getExecuteOptions(params: {
-        executor: string;
-        payload: string;
-        feeAmount: string | number;
-        feeToken: string;
-        relayer: string;
-    }) {
-        const paymaster = this.getPaymasterAddress(this.config.network, 'v4');
-        const [contractAddress, contractName] = paymaster.split('.');
-
-        return {
-            contractAddress,
-            contractName,
-            functionName: 'execute-gasless',
-            functionArgs: [
-                principalCV(params.executor),
-                bufferCV(Buffer.from(params.payload.replace(/^0x/, ''), 'hex')),
-                uintCV(params.feeAmount),
-                principalCV(params.relayer),
-                principalCV(params.feeToken)
-            ],
-            sponsored: true,
-            network: this.config.network
-        };
-    }
-
-    /**
-     * Internal: Get the Paymaster address for the target network.
-     */
-    private getPaymasterAddress(network: 'mainnet' | 'testnet', version: 'v1' | 'v4' | 'v5' | 'relayer-v1' = 'relayer-v1'): string {
-        if (network === 'mainnet') {
-            if (version === 'v4') return 'SPKYNF473GQ1V0WWCF24TV7ZR1WYAKTC7AM8QGBW.simple-paymaster-v4';
-            if (version === 'v5') return 'SPKYNF473GQ1V0WWCF24TV7ZR1WYAKTC7AM8QGBW.universal-paymaster-v5';
-            if (version === 'v1') return 'SPKYNF473GQ1V0WWCF24TV7ZR1WYAKTC7AM8QGBW.velumx-paymaster-1';
-            return 'SPKYNF473GQ1V0WWCF24TV7ZR1WYAKTC7AM8QGBW.velumx-paymaster-1-1';
-        }
-        if (version === 'v4') return 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.simple-paymaster-v4';
-        if (version === 'v5') return 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.universal-paymaster-v5';
-        if (version === 'v1') return 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.velumx-paymaster-1';
-        return 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.velumx-paymaster-1-1';
-    }
-
-    /**
-     * Get the developer's Relayer Registry Address for the current network.
-     */
-    public getRegistryAddress(): string {
-        return this.config.network === 'mainnet'
-            ? 'SPKYNF473GQ1V0WWCF24TV7ZR1WYAKTC7AM8QGBW.velumx-registry-v1'
-            : 'STKYNF473GQ1V0WWCF24TV7ZR1WYAKTC79V25E3P.velumx-registry-v1';
-    }
-
     private headers(): Record<string, string> {
         const h: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (this.config.apiKey && this.config.apiKey !== 'proxied') {
+        if (this.config.apiKey) {
             h['x-api-key'] = this.config.apiKey;
         }
         return h;
     }
+}
 
-    /**
-     * Universal sponsorCall: The single entry point for any gasless transaction.
-     * 1. Generates the sponsorship intent.
-     * 2. Coordinates signing of the intent and the transaction.
-     * 3. Sends to the VelumX Relayer for sponsorship and settlement.
-     */
-    public async sponsorCall(params: {
-        projectId: string;
-        txHex: string;     
-        intent: {
-            user: string;
-            userPubKey: string;
-            token: string;
-            amount: string;
-            expiration: number;
-            nonce: number;
-            signature: string;
-        };
-        network?: 'mainnet' | 'testnet';
-    }): Promise<SponsorResult> {
-        const response = await fetch(`${this.relayerUrl}/sponsor-universal`, {
-            method: 'POST',
-            headers: this.headers(),
-            body: JSON.stringify({
-                projectId: params.projectId,
-                txHex: params.txHex,
-                intent: params.intent,
-                network: params.network || this.config.network
-            })
-        });
+/**
+ * Build an unsigned sponsored ContractCall transaction ready for wallet signing.
+ *
+ * Pass the returned Uint8Array directly to stx_signTransaction, then pass
+ * the signed hex to velumx.sponsor().
+ *
+ * @example
+ * ```ts
+ * import { buildSponsoredContractCall } from '@velumx/sdk';
+ * import { uintCV } from '@stacks/transactions';
+ * import { request } from '@stacks/connect';
+ *
+ * const unsignedTx = await buildSponsoredContractCall({
+ *   contractAddress: 'SPQC38PW542EQJ5M11CR25P7BS1CA6QT4TBXGB3M',
+ *   contractName: 'stableswap-stx-ststx-v-1-2',
+ *   functionName: 'swap-x-for-y',
+ *   functionArgs: [uintCV(1n), tokenXCV, tokenYCV, uintCV(1_000_000n), uintCV(990_000n)],
+ *   publicKey: userPublicKey,
+ * });
+ *
+ * const signResult = await request('stx_signTransaction', {
+ *   transaction: unsignedTx,
+ *   broadcast: false,
+ * });
+ *
+ * const { txid } = await velumx.sponsor(signResult.transaction);
+ * ```
+ */
+export async function buildSponsoredContractCall(params: ContractCallParams): Promise<Uint8Array | string> {
+    const { contractAddress, contractName, functionName, functionArgs, publicKey, nonce, network = 'mainnet' } = params;
 
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({ error: response.statusText })) as any;
-            throw new Error(`Universal sponsorship failed: ${err.error || err.message || response.statusText}`);
+    // Auto-fetch nonce if not provided
+    let resolvedNonce = nonce;
+    if (resolvedNonce === undefined) {
+        try {
+            const apiBase = network === 'mainnet'
+                ? 'https://api.mainnet.hiro.so'
+                : 'https://api.testnet.hiro.so';
+            // We can't derive address from pubkey without knowing the version byte,
+            // so nonce defaults to 0 when not provided — caller should pass it explicitly
+            // for production use to avoid nonce conflicts.
+            resolvedNonce = 0n;
+            void apiBase; // suppress unused warning
+        } catch {
+            resolvedNonce = 0n;
         }
-
-        return response.json() as Promise<SponsorResult>;
     }
+
+    const tx = await makeUnsignedContractCall({
+        contractAddress,
+        contractName,
+        functionName,
+        functionArgs,
+        postConditionMode: PostConditionMode.Allow,
+        postConditions: [],
+        network,
+        sponsored: true,
+        publicKey,
+        fee: 0n,
+        nonce: resolvedNonce ?? 0n,
+        validateWithAbi: false,
+    });
+
+    return tx.serialize();
 }

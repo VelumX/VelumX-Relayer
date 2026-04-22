@@ -232,17 +232,6 @@ export const createRateLimiters = (redisClient?: import('ioredis').Redis | null)
             message: 'Too many estimation requests from this IP.'
         }, redisClient),
 
-        sponsor: new RateLimiter({
-            windowMs: 60000,
-            maxRequests: 30,
-            message: 'Too many sponsorship requests. Please slow down.'
-        }, redisClient),
-        sponsorIp: new IpRateLimiter({
-            windowMs: 60000,
-            maxRequests: 40,
-            message: 'Too many sponsorship requests from this IP.'
-        }, redisClient),
-
         broadcast: new RateLimiter({
             windowMs: 60000,
             maxRequests: 20,
