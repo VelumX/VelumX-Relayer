@@ -6,7 +6,7 @@
 
 ## Overview
 
-The VelumX Relayer is the core infrastructure product. Developers integrate gasless transactions by calling `velumx.sponsor(signedTxHex)` from the SDK — the relayer handles everything else.
+The VelumX Relayer is the core infrastructure product. Developers integrate gasless transactions by calling `velumx.sponsor(signedTxHex)` from the SDK — the relayer handles everything else
 
 **What the relayer does:**
 - Validates the developer's API key
