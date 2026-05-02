@@ -1,0 +1,51 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'relayer/**'
+      - 'dashboard/**'
+      - 'deploy/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.CONTABO_HOST }}
+          username: velumx
+          key: ${{ secrets.CONTABO_SSH_KEY }}
+          script_stop: true
+          script: |
+            echo "=== VelumX CI/CD Deploy ==="
+            # Go to the repository folder on the server
+            cd ~/VelumX/VelumX-Relayer || cd ~/VelumX-Relayer || cd ~/VelumX
+            
+            git pull origin main
+
+            # Rebuild relayer
+            echo "→ Building Relayer..."
+            cd relayer
+            npm install --production=false
+            npx prisma generate
+            npm run build
+
+            # Rebuild dashboard
+            echo "→ Building Dashboard..."
+            cd ../dashboard
+            npm install --production=false
+            npx prisma generate
+            npm run build
+
+            # Restart both services
+            echo "→ Restarting PM2..."
+            pm2 restart velumx-relayer velumx-dashboard || pm2 start ecosystem.config.cjs
+            pm2 save
+
+            echo "=== Deploy Complete ==="
+            pm2 status
+
