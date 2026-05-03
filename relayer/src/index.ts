@@ -124,11 +124,10 @@ app.get('/api/dashboard/export-key', verifySupabaseToken, async (req: AuthReques
     try {
         const userId = req.userId!;
         const key = paymasterService.getUserRelayerKey(userId);
-        const { getAddressFromPrivateKey: getAddr } = await import('@stacks/transactions');
         res.json({
             projectId: userId,
-            mainnetAddress: getAddr(key, 'mainnet'),
-            testnetAddress: getAddr(key, 'testnet'),
+            mainnetAddress: getAddressFromPrivateKey(key, 'mainnet'),
+            testnetAddress: getAddressFromPrivateKey(key, 'testnet'),
             paymasterMainnet: paymasterService.getPaymasterAddress('mainnet'),
             paymasterTestnet: paymasterService.getPaymasterAddress('testnet'),
             key
@@ -176,7 +175,7 @@ app.get('/api/dashboard/stats', verifySupabaseToken, rateLimiters.dashboard.midd
                     (prisma.transaction as any).findMany({ where: { userId, network: networkType, status: { in: ['Success', 'Confirmed'] } } }),
                     (prisma.transaction as any).count({ where: { userId, network: networkType, status: { notIn: ['Failed'] } } }),
                     paymasterService.getStxPrice(),
-                    fetch(`${hiroApiBase}/extended/v1/address/${relayerAddress}/balances`)
+                    fetch(`${hiroApiBase}/extended/v1/address/${relayerAddress}/balances`, { signal: AbortSignal.timeout(4000) })
                         .then(r => r.ok ? r.json() : null)
                         .catch(() => null)
                 ]);

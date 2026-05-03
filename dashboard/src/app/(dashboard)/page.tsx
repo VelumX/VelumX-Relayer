@@ -51,12 +51,6 @@ export default function DashboardOverview() {
 
         const fetchStats = async () => {
           try {
-            // Always clear stale Redis cache before fetching — ensures fresh data on every page visit
-            await fetch(`${RELAYER_URL}/api/dashboard/cache-clear`, {
-              method: 'POST',
-              headers: { 'Authorization': `Bearer ${token}` }
-            }).catch(() => {});
-
             const res = await fetch(`${RELAYER_URL}/api/dashboard/stats`, {
               cache: 'no-store',
               headers: { 'Authorization': `Bearer ${token}` }

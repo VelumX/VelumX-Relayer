@@ -5,7 +5,7 @@ import { Search, Filter, ExternalLink, Activity } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useWallet } from '@/components/providers/WalletContext';
 
-const RELAYER_URL = process.env.NEXT_PUBLIC_VELUMX_RELAYER_URL || 'http://localhost:4000';
+const RELAYER_URL = process.env.NEXT_PUBLIC_VELUMX_RELAYER_URL || 'https://api.velumx.xyz';
 
 export default function TransactionLogsPage() {
     const [isClient, setIsClient] = useState(false);

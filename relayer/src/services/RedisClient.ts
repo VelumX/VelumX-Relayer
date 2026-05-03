@@ -27,8 +27,8 @@ export function getRedisClient(): Redis | null {
     return client;
 }
 
-// Dashboard stats cache — 2 minute TTL
-const STATS_TTL = 120; // seconds
+// Dashboard stats cache — 5 minute TTL
+const STATS_TTL = 300; // seconds
 
 export async function getCachedStats(userId: string): Promise<any | null> {
     const redis = getRedisClient();
