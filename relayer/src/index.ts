@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import crypto from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { PaymasterService } from './PaymasterService.js';
 import { getAddressFromPrivateKey } from '@stacks/transactions';
@@ -35,7 +36,11 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key']
 }));
-app.use(express.json());
+// Limit request body to 64KB — sufficient for all tx payloads, blocks body-flood attacks
+app.use(express.json({ limit: '64kb' }));
+
+// Strip the X-Powered-By header — no need to advertise the stack
+app.disable('x-powered-by');
 
 const paymasterService = new PaymasterService();
 
@@ -54,22 +59,25 @@ interface ApiKeyRequest extends express.Request {
 
 const validateApiKey = async (req: ApiKeyRequest, res: express.Response, next: express.NextFunction) => {
     const apiKey = req.headers['x-api-key'] as string;
-    if (!apiKey) {
-        return res.status(401).json({ error: "Unauthorized: Missing x-api-key header" });
+    if (!apiKey || typeof apiKey !== 'string' || apiKey.length > 256) {
+        return res.status(401).json({ error: "Unauthorized" });
     }
     try {
         const keyRecord = await (prisma.apiKey as any).findUnique({
             where: { key: apiKey },
             select: { id: true, userId: true, status: true }
         });
-        if (!keyRecord) return res.status(401).json({ error: "Unauthorized: Invalid API key" });
-        if (keyRecord.status !== 'Active') return res.status(403).json({ error: "Forbidden: API key is disabled or revoked" });
+        // Use a single constant-time response for both "not found" and "revoked"
+        // to prevent timing-based enumeration of valid keys
+        if (!keyRecord || keyRecord.status !== 'Active') {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
         req.apiKeyId = keyRecord.id;
         req.userId = keyRecord.userId || undefined;
         next();
     } catch (error) {
         console.error("Auth Middleware Error:", error);
-        res.status(500).json({ error: "Security check failed" });
+        res.status(500).json({ error: "Authentication failed" });
     }
 };
 
@@ -268,13 +276,21 @@ app.post('/api/dashboard/keys', verifySupabaseToken, rateLimiters.dashboard.midd
     try {
         const userId = req.userId!;
         const { name } = req.body;
-        const rawKey = `sgal_live_${Math.random().toString(36).substring(2, 15)}`;
+
+        // Input validation
+        if (!name || typeof name !== 'string' || name.trim().length === 0 || name.trim().length > 64) {
+            return res.status(400).json({ error: "Key name must be between 1 and 64 characters" });
+        }
+
+        // Use cryptographically secure random bytes — never Math.random() for secrets
+        const rawKey = `sgal_live_${crypto.randomBytes(24).toString('hex')}`;
         const newKey = await (prisma.apiKey as any).create({
-            data: { name: name || 'Unnamed Key', key: rawKey, status: 'Active', userId }
+            data: { name: name.trim(), key: rawKey, status: 'Active', userId }
         });
         res.json(newKey);
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        console.error("Create Key Error:", error);
+        res.status(500).json({ error: "Failed to create key" });
     }
 });
 

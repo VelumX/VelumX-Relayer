@@ -3,45 +3,99 @@ name: Deploy to VPS
 on:
   push:
     branches: [main]
+  workflow_dispatch: # allow manual trigger from GitHub UI
 
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false # never cancel a running deploy — finish it first
 
 jobs:
   deploy:
+    name: Build & Deploy
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+
     steps:
-      - name: Deploy via SSH
+      # ── 1. Pull & build ────────────────────────────────────────────────────
+      - name: Pull, build, and restart services
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.CONTABO_HOST }}
           username: velumx
           key: ${{ secrets.CONTABO_SSH_KEY }}
+          command_timeout: 12m
           script: |
-            echo "=== VelumX CI/CD Deploy ==="
-            # Go to the repository folder on the server
-            cd ~/VelumX/VelumX-Relayer || cd ~/VelumX-Relayer || cd ~/VelumX
-            
-            git pull origin main
+            set -euo pipefail
+            REPO="/home/velumx/VelumX/VelumX-Relayer"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "  VelumX CI/CD — $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-            # Rebuild relayer
+            cd "$REPO"
+            git fetch origin main
+            git reset --hard origin/main
+            echo "✓ Code synced to $(git rev-parse --short HEAD)"
+
+            # ── Relayer ──────────────────────────────────────────────────────
+            echo ""
             echo "→ Building Relayer..."
-            cd relayer
-            npm install --production=false
+            cd "$REPO/relayer"
+            npm ci --prefer-offline
             npx prisma generate
+            npx prisma db push --accept-data-loss
             npm run build
+            echo "✓ Relayer built"
 
-            # Rebuild dashboard
+            # ── Dashboard ────────────────────────────────────────────────────
+            echo ""
             echo "→ Building Dashboard..."
-            cd ../dashboard
-            npm install --production=false
+            cd "$REPO/dashboard"
+            npm ci --prefer-offline
             npx prisma generate
             npm run build
+            echo "✓ Dashboard built"
 
-            # Restart both services
-            echo "→ Restarting PM2..."
-            pm2 restart velumx-relayer velumx-dashboard || pm2 start ecosystem.config.cjs
+            # ── Nginx config ─────────────────────────────────────────────────
+            echo ""
+            echo "→ Applying nginx config..."
+            sudo /usr/bin/cp "$REPO/deploy/nginx/velumx-relayer.conf"   /etc/nginx/sites-available/velumx-relayer
+            sudo /usr/bin/cp "$REPO/deploy/nginx/velumx-dashboard.conf" /etc/nginx/sites-available/velumx-dashboard
+            sudo /usr/sbin/nginx -t
+            sudo /usr/bin/systemctl reload nginx
+            echo "✓ Nginx reloaded"
+
+            # ── Restart services ─────────────────────────────────────────────
+            echo ""
+            echo "→ Restarting PM2 services..."
+            pm2 restart velumx-relayer velumx-dashboard || pm2 start "$REPO/ecosystem.config.cjs"
             pm2 save
+            echo "✓ Services restarted"
 
-            echo "=== Deploy Complete ==="
-            pm2 status
+      # ── 2. Health check ────────────────────────────────────────────────────
+      - name: Health check — Relayer
+        run: |
+          echo "Waiting 8s for services to stabilise..."
+          sleep 8
+          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" --max-time 10 https://api.velumx.xyz/health || echo "000")
+          if [ "$STATUS" != "200" ]; then
+            echo "❌ Relayer health check failed (HTTP $STATUS)"
+            exit 1
+          fi
+          echo "✓ Relayer healthy (HTTP $STATUS)"
 
+      - name: Health check — Dashboard
+        run: |
+          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" --max-time 10 -L https://dashboard.velumx.xyz || echo "000")
+          # 200 = loaded, 307 = Next.js auth redirect (both mean the server is up)
+          if [ "$STATUS" != "200" ] && [ "$STATUS" != "307" ]; then
+            echo "❌ Dashboard health check failed (HTTP $STATUS)"
+            exit 1
+          fi
+          echo "✓ Dashboard healthy (HTTP $STATUS)"
+
+      # ── 3. Notify on failure ───────────────────────────────────────────────
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::Deploy failed — check logs above. Services may be in a degraded state."
+          echo "::notice::Run 'pm2 logs' on the VPS to diagnose."

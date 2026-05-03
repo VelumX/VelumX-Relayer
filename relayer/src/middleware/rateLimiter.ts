@@ -133,11 +133,14 @@ export class IpRateLimiter {
     }
 
     private getIp(req: Request): string {
-        // Respect X-Forwarded-For when behind a reverse proxy
+        // SECURITY: Only trust the LAST entry in X-Forwarded-For.
+        // nginx appends the real client IP at the end — an attacker can prepend
+        // arbitrary IPs to the header, but cannot forge the last entry which
+        // nginx itself adds. Trusting the first entry is a bypass vector.
         const forwarded = req.headers['x-forwarded-for'];
         if (forwarded) {
             const ips = (typeof forwarded === 'string' ? forwarded : forwarded[0]).split(',');
-            return ips[0].trim();
+            return ips[ips.length - 1].trim();
         }
         return req.ip || req.socket?.remoteAddress || 'unknown';
     }
