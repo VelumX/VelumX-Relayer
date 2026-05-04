@@ -24,7 +24,7 @@ import { useWallet } from '@/components/providers/WalletContext';
 interface ApiKey {
     id: string;
     name: string;
-    key: string;
+    key?: string; // only present immediately after creation — not returned by GET
     sponsorshipPolicy: 'USER_PAYS' | 'DEVELOPER_SPONSORS';
     markupPercentage: number;
     maxSponsoredTxsPerUser: number;
@@ -381,6 +381,12 @@ export default function ApiKeysPage() {
                     <div className="bg-[#0a0a0a] border border-white/10 rounded-xl p-6 max-w-md w-full">
                         <h3 className="text-xl font-bold text-white mb-4">Generate New API Key</h3>
                         <div className="space-y-4">
+                            <div className="flex items-start gap-3 px-4 py-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                                <ShieldAlert className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                                <p className="text-xs text-amber-300/80 leading-relaxed">
+                                    Your secret key will only be shown <span className="font-bold text-amber-300">once</span> at creation. Copy and store it somewhere safe — it cannot be retrieved again.
+                                </p>
+                            </div>
                             <div>
                                 <label htmlFor="keyName" className="block text-sm font-medium text-white/60 mb-2">
                                     Key Name
@@ -459,15 +465,24 @@ export default function ApiKeysPage() {
                                     <td className="px-6 py-4 whitespace-nowrap">
                                         <div className="flex items-center gap-2">
                                             <code className="px-2 py-1 bg-black/40 rounded text-xs text-white/60 font-mono border border-white/5">
-                                                {k.key}
+                                                {k.key ? maskKey(k.key) : 'vx_••••••••••••••••••••••••••••••••'}
                                             </code>
-                                            <button
-                                                onClick={() => copyToClipboard(k.key)}
-                                                className="text-white/20 hover:text-white transition-colors p-1"
-                                                title="Copy to clipboard"
-                                            >
-                                                <Copy className="w-3.5 h-3.5" />
-                                            </button>
+                                            {k.key ? (
+                                                <button
+                                                    onClick={() => copyToClipboard(k.key!)}
+                                                    className="text-white/20 hover:text-white transition-colors p-1"
+                                                    title="Copy to clipboard"
+                                                >
+                                                    <Copy className="w-3.5 h-3.5" />
+                                                </button>
+                                            ) : (
+                                                <span
+                                                    className="text-[10px] text-white/20 italic"
+                                                    title="Secret keys are only shown once at creation"
+                                                >
+                                                    hidden
+                                                </span>
+                                            )}
                                         </div>
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
