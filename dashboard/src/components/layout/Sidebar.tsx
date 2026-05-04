@@ -8,6 +8,7 @@ import { LayoutDashboard } from 'lucide-react';
 import { Key } from 'lucide-react';
 import { Wallet } from 'lucide-react';
 import { Activity } from 'lucide-react';
+import { LifeBuoy } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useWallet } from '../providers/WalletContext';
@@ -17,6 +18,7 @@ const navItems = [
     { name: 'API Keys', href: '/api-keys', icon: Key },
     { name: 'Relayer', href: '/funding', icon: Wallet },
     { name: 'Transaction Logs', href: '/logs', icon: Activity },
+    { name: 'Support', href: '/support', icon: LifeBuoy },
 ];
 
 export function Sidebar() {

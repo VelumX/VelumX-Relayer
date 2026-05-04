@@ -179,6 +179,13 @@ export default function SignUpPage() {
             </Link>
           </p>
         </div>
+
+        <p className="text-center text-xs text-white/20">
+          Want to integrate or partner with us?{" "}
+          <Link href="/contact" className="text-white/40 hover:text-white transition-colors font-medium">
+            Get in touch →
+          </Link>
+        </p>
       </div>
     </div>
   )
