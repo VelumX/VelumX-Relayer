@@ -1,16 +1,12 @@
 'use client';
 
-import { Bell } from 'lucide-react';
-import { Search } from 'lucide-react';
-import { User } from 'lucide-react';
-import { LogOut } from 'lucide-react';
+import { Bell, Search, User, LogOut, Globe, TestTube2 } from 'lucide-react';
 import { useUser } from '@/components/providers/SessionProvider';
-import { useWallet } from '@/components/providers/WalletContext'; 
+import { useWallet } from '@/components/providers/WalletContext';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
-import { Globe, TestTube2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import Image from 'next/image';
+import clsx from 'clsx';
 
 export function TopNav() {
     const { user } = useUser();
@@ -21,81 +17,86 @@ export function TopNav() {
     const handleSignOut = async () => {
         try {
             await supabase.auth.signOut();
-            toast.success('Signed out successfully');
+            toast.success('Signed out');
             router.push('/auth/signin');
             router.refresh();
-        } catch (error) {
+        } catch {
             toast.error('Failed to sign out');
         }
     };
 
+    const displayName = user?.user_metadata?.name || user?.email?.split('@')[0] || 'User';
+
     return (
-        <header className="h-20 w-full border-b border-white/10 bg-[#000000] flex items-center justify-between px-8 z-10 sticky top-0">
-            <div className="flex items-center gap-4 w-96">
-                <div className="relative w-full">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
-                    <input
-                        type="text"
-                        placeholder="Search API keys, logs..."
-                        className="w-full bg-white/5 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-sm text-white focus:outline-none focus:border-white/20 transition-all placeholder:text-white/20"
-                    />
-                </div>
+        <header className="h-[60px] w-full border-b border-white/[0.07] bg-black/80 backdrop-blur-md flex items-center justify-between px-6 z-10 sticky top-0">
+
+            {/* Search */}
+            <div className="relative w-72">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30" />
+                <input
+                    type="text"
+                    placeholder="Search keys, logs, addresses..."
+                    className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg pl-9 pr-4 py-2 text-sm text-white/80 focus:outline-none focus:border-white/20 focus:bg-white/[0.06] transition-all placeholder:text-white/25"
+                />
             </div>
 
-            <div className="flex items-center gap-4 bg-white/5 border border-white/10 rounded-full p-1">
+            {/* Network toggle */}
+            <div className="flex items-center gap-1 bg-white/[0.04] border border-white/[0.08] rounded-lg p-1">
                 <button
                     onClick={() => setNetwork('mainnet')}
-                    className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium transition-all ${
+                    className={clsx(
+                        'flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all',
                         network === 'mainnet'
-                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/20'
-                            : 'text-white/40 hover:text-white/60'
-                    }`}
+                            ? 'bg-white/[0.08] text-white border border-white/10'
+                            : 'text-white/35 hover:text-white/60'
+                    )}
                 >
-                    <Globe className="w-3.5 h-3.5" />
+                    <Globe className="w-3 h-3" />
                     Mainnet
                 </button>
                 <button
                     onClick={() => setNetwork('testnet')}
-                    className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium transition-all ${
+                    className={clsx(
+                        'flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all',
                         network === 'testnet'
-                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/20'
-                            : 'text-white/40 hover:text-white/60'
-                    }`}
+                            ? 'bg-white/[0.08] text-white border border-white/10'
+                            : 'text-white/35 hover:text-white/60'
+                    )}
                 >
-                    <TestTube2 className="w-3.5 h-3.5" />
+                    <TestTube2 className="w-3 h-3" />
                     Testnet
                 </button>
             </div>
 
-            <div className="flex items-center gap-6">
-                <button className="relative text-white/40 hover:text-white transition-colors">
-                    <Bell className="w-5 h-5" />
-                    <span className="absolute -top-1 -right-1 w-2 h-2 bg-white rounded-full border-2 border-black"></span>
+            {/* Right actions */}
+            <div className="flex items-center gap-3">
+
+                {/* Notifications */}
+                <button className="relative w-8 h-8 flex items-center justify-center rounded-lg text-white/40 hover:text-white hover:bg-white/[0.06] transition-all border border-transparent hover:border-white/[0.08]">
+                    <Bell className="w-4 h-4" />
+                    <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-white rounded-full" />
                 </button>
 
-                <div className="h-6 w-px bg-white/10" />
+                <div className="w-px h-5 bg-white/[0.08]" />
 
+                {/* User */}
                 {user && (
-                    <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-3 py-1.5 px-3 rounded-lg border border-white/10 bg-white/5">
-                            <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center">
-                                <User className="w-4 h-4 text-white/60" />
+                    <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2.5 py-1.5 px-3 rounded-lg border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.05] transition-colors">
+                            <div className="w-6 h-6 rounded-full bg-white/10 border border-white/10 flex items-center justify-center flex-shrink-0">
+                                <User className="w-3.5 h-3.5 text-white/60" />
                             </div>
-                            <div className="text-left hidden sm:block">
-                                <p className="text-xs font-medium text-white">
-                                    {user.user_metadata?.name || user.email?.split('@')[0] || 'User'}
-                                </p>
-                                <p className="text-[10px] text-white/40">
-                                    {user.email}
-                                </p>
+                            <div className="hidden sm:block">
+                                <p className="text-xs font-semibold text-white leading-none">{displayName}</p>
+                                <p className="text-[10px] text-white/35 mt-0.5 leading-none">{user.email}</p>
                             </div>
                         </div>
                         <button
                             onClick={handleSignOut}
-                            className="p-2 hover:bg-rose-500/10 rounded-lg text-white/40 hover:text-rose-400 transition-colors"
                             title="Sign out"
+                            className="w-8 h-8 flex items-center justify-center rounded-lg text-white/30 hover:text-rose-400 hover:bg-rose-500/10 transition-all border border-transparent hover:border-rose-500/20"
                         >
-                            <LogOut className="w-4 h-4" />
+                            <LogOut className="w-3.5 h-3.5" />
                         </button>
                     </div>
                 )}

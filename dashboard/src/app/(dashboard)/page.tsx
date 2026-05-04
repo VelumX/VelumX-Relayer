@@ -1,183 +1,231 @@
 'use client';
 
-import { Activity, Users, BatteryCharging } from 'lucide-react';
+import { Activity, Users, BatteryCharging, TrendingUp } from 'lucide-react';
 import { useWallet } from '@/components/providers/WalletContext';
 import { useStats } from '@/components/providers/StatsProvider';
+import clsx from 'clsx';
 
 function formatUsd(value: string | number): string {
-  const n = parseFloat(value as string) || 0;
-  if (n === 0) return '0.00';
-  if (n < 0.01) return n.toFixed(6);
-  if (n < 1) return n.toFixed(4);
-  return n.toFixed(2);
+    const n = parseFloat(value as string) || 0;
+    if (n === 0) return '0.00';
+    if (n < 0.01) return n.toFixed(6);
+    if (n < 1) return n.toFixed(4);
+    return n.toFixed(2);
+}
+
+function statusClass(status: string) {
+    const s = status === 'Success' ? 'Confirmed' : status;
+    if (s === 'Confirmed') return 'text-emerald-400';
+    if (s === 'Pending')   return 'text-amber-400';
+    return 'text-rose-400';
 }
 
 export default function DashboardOverview() {
-  const { network: currentNetwork } = useWallet();
-  const { stats: statsData, logs, isLoading } = useStats();
+    const { network: currentNetwork } = useWallet();
+    const { stats: statsData, logs, isLoading } = useStats();
 
-  const currentStats = statsData.networks?.[currentNetwork] || {
-    totalTransactions: 0,
-    totalSponsored: '0',
-    relayerAddress: '',
-    relayerStxBalance: '0',
-    relayerFeeBalance: '0',
-    feeToken: 'USD',
-  };
+    const currentStats = statsData.networks?.[currentNetwork] || {
+        totalTransactions: 0,
+        totalSponsored: '0',
+        relayerAddress: '',
+        relayerStxBalance: '0',
+        relayerFeeBalance: '0',
+        feeToken: 'USD',
+    };
 
-  const metricCards = [
-    {
-      title: 'Total Gas Sponsored',
-      value: `${formatUsd(currentStats.totalSponsored)} USD`,
-      icon: BatteryCharging,
-      color: 'bg-white/5',
-    },
-    {
-      title: 'Active API Keys',
-      value: statsData.activeKeys.toString(),
-      icon: Activity,
-      color: 'bg-white/5',
-    },
-    {
-      title: 'Total Transactions',
-      value: currentStats.totalTransactions.toString(),
-      icon: Users,
-      color: 'bg-white/5',
-    },
-  ];
+    const metricCards = [
+        {
+            title: 'Gas Sponsored',
+            value: `$${formatUsd(currentStats.totalSponsored)}`,
+            unit: 'USD',
+            icon: BatteryCharging,
+            trend: null,
+        },
+        {
+            title: 'Active API Keys',
+            value: statsData.activeKeys.toString(),
+            unit: 'keys',
+            icon: Activity,
+            trend: null,
+        },
+        {
+            title: 'Transactions',
+            value: currentStats.totalTransactions.toString(),
+            unit: 'total',
+            icon: Users,
+            trend: null,
+        },
+    ];
 
-  return (
-    <div className="space-y-8 pb-12">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-white">Overview</h1>
-          <p className="text-white/40 mt-1 text-sm">Monitor your dApp's gas abstraction performance.</p>
-        </div>
+    return (
+        <div className="space-y-7 pb-12">
 
-        {!isLoading && currentStats.relayerAddress && (
-          <div className="glass-card px-5 py-3 flex items-center gap-6 border-white/5 bg-white/[0.01] hover:bg-white/[0.03] transition-colors">
-            <div className="flex flex-col">
-              <span className="text-[9px] text-white/20 uppercase font-black tracking-widest mb-1">
-                Relayer ({currentNetwork})
-              </span>
-              <div className="flex items-center gap-2">
-                <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${currentNetwork === 'mainnet' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                <span className="text-[11px] text-white/60 font-mono tracking-tight">
-                  {currentStats.relayerAddress.substring(0, 8)}...{currentStats.relayerAddress.substring(currentStats.relayerAddress.length - 6)}
-                </span>
-              </div>
-            </div>
-            <div className="h-8 w-px bg-white/10" />
-            <div className="flex flex-col">
-              <span className="text-[9px] text-white/20 uppercase font-black tracking-widest mb-1">STX Balance</span>
-              <span className="text-[11px] text-white font-bold font-mono">
-                {(parseInt(currentStats.relayerStxBalance) / 1_000_000).toFixed(2)} <span className="text-white/40 font-medium">STX</span>
-              </span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-[9px] text-white/20 uppercase font-black tracking-widest mb-1">Rev. ({currentNetwork})</span>
-              <span className={`text-[11px] font-bold font-mono ${currentNetwork === 'mainnet' ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {formatUsd(currentStats.relayerFeeBalance)} <span className="opacity-40 font-medium">USD</span>
-              </span>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Metrics Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {metricCards.map((stat) => (
-          <div key={stat.title} className="glass-card p-6 flex flex-col justify-between h-36">
-            <div className="flex justify-between items-start">
-              <div>
-                <p className="text-white/40 font-medium text-[10px] uppercase tracking-wider">{stat.title}</p>
-                <h3 className="text-2xl font-bold text-white mt-2 font-mono">
-                  {isLoading ? '...' : stat.value}
-                </h3>
-              </div>
-              <div className={`w-8 h-8 rounded-lg ${stat.color} flex items-center justify-center border border-white/10`}>
-                <stat.icon className="w-4 h-4 text-white/60" />
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Chart */}
-      <div className="glass-card w-full h-[400px] p-8 flex flex-col">
-        <div className="flex justify-between items-center mb-10">
-          <h2 className="text-sm font-bold text-white uppercase tracking-wider">Sponsorship Volume (Transactions)</h2>
-          <select className="bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-white/20 transition-colors appearance-none outline-none">
-            <option>Last 7 Days</option>
-            <option>Last 30 Days</option>
-          </select>
-        </div>
-
-        <div className="flex-1 w-full flex items-end justify-between px-4 pb-4 gap-4 border-b border-l border-white/5 relative">
-          {(() => {
-            const last7Days = Array.from({ length: 7 }, (_, i) => {
-              const d = new Date();
-              d.setDate(d.getDate() - (6 - i));
-              return d.toISOString().split('T')[0];
-            });
-            const dailyTotals = last7Days.map(date =>
-              logs.filter(log => log.createdAt.startsWith(date)).length
-            );
-            const maxTotal = Math.max(...dailyTotals, 1);
-            return dailyTotals.map((total, i) => (
-              <div
-                key={i}
-                style={{ height: `${Math.max((total / maxTotal) * 100, 2)}%` }}
-                className="w-full rounded-sm bg-white/20 hover:bg-white/40 transition-colors relative group"
-              >
-                <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-white text-black text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-20">
-                  {total} tx
-                </div>
-              </div>
-            ));
-          })()}
-          <div className="absolute -left-10 bottom-[20%] text-[10px] text-white/20 font-mono">20%</div>
-          <div className="absolute -left-10 bottom-[50%] text-[10px] text-white/20 font-mono">50%</div>
-          <div className="absolute -left-10 bottom-[80%] text-[10px] text-white/20 font-mono">80%</div>
-        </div>
-        <div className="flex justify-between w-full mt-4 px-4 text-[10px] text-white/20 uppercase font-bold tracking-widest font-mono">
-          {Array.from({ length: 7 }, (_, i) => {
-            const d = new Date();
-            d.setDate(d.getDate() - (6 - i));
-            return <span key={i}>{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]}</span>;
-          })}
-        </div>
-      </div>
-
-      {/* Recent Activity */}
-      <div className="glass-card w-full p-8">
-        <h2 className="text-sm font-bold text-white mb-8 uppercase tracking-wider">Recent Activity</h2>
-        <div className="space-y-2">
-          {isLoading ? (
-            <p className="text-white/20 text-center py-4 text-xs">Loading activity...</p>
-          ) : logs.length === 0 ? (
-            <p className="text-white/20 text-center py-4 text-xs">No recent activity.</p>
-          ) : logs.slice(0, 5).map((log) => (
-            <div key={log.id} className="flex justify-between items-center p-4 hover:bg-white/[0.02] border border-white/5 rounded-xl transition-colors">
-              <div className="flex gap-4 items-center">
-                <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center border border-white/10">
-                  <Activity className="w-3.5 h-3.5 text-white/40" />
-                </div>
+            {/* Page header */}
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div>
-                  <p className="text-white text-xs font-bold">{log.type}</p>
-                  <p className="text-[10px] text-white/40 font-mono mt-0.5">{log.txid.substring(0, 16)}...</p>
+                    <p className="text-[10px] font-bold text-white/30 uppercase tracking-[0.18em] mb-2">
+                        {currentNetwork === 'mainnet' ? 'Mainnet' : 'Testnet'} · Live
+                    </p>
+                    <h1 className="text-2xl font-bold tracking-tight text-white">Overview</h1>
+                    <p className="text-sm text-white/50 mt-1">Gas abstraction performance for your dApp.</p>
                 </div>
-              </div>
-              <div className="text-right">
-                <p className="text-white text-xs font-bold font-mono">{log.txid.substring(0, 10)}...</p>
-                <p className={`text-[10px] font-bold mt-0.5 ${(log.status === 'Confirmed' || log.status === 'Success') ? 'text-emerald-400' : log.status === 'Pending' ? 'text-amber-400' : 'text-rose-400'}`}>
-                  {log.status === 'Success' ? 'Confirmed' : log.status}
-                </p>
-              </div>
+
+                {/* Relayer status pill */}
+                {!isLoading && currentStats.relayerAddress && (
+                    <div className="flex items-center gap-5 px-5 py-3 rounded-xl border border-white/[0.08] bg-white/[0.03]">
+                        <div>
+                            <p className="text-[9px] font-bold text-white/30 uppercase tracking-widest mb-1">Relayer</p>
+                            <div className="flex items-center gap-1.5">
+                                <span className={clsx(
+                                    'w-1.5 h-1.5 rounded-full flex-shrink-0',
+                                    currentNetwork === 'mainnet'
+                                        ? 'bg-emerald-400 shadow-[0_0_5px_rgba(52,211,153,0.7)]'
+                                        : 'bg-amber-400 shadow-[0_0_5px_rgba(251,191,36,0.7)]'
+                                )} />
+                                <code className="text-xs text-white/70 font-mono">
+                                    {currentStats.relayerAddress.substring(0, 8)}…{currentStats.relayerAddress.slice(-6)}
+                                </code>
+                            </div>
+                        </div>
+                        <div className="w-px h-8 bg-white/[0.08]" />
+                        <div>
+                            <p className="text-[9px] font-bold text-white/30 uppercase tracking-widest mb-1">STX Balance</p>
+                            <p className="text-xs font-bold text-white font-mono stat-value">
+                                {(parseInt(currentStats.relayerStxBalance) / 1_000_000).toFixed(2)}
+                                <span className="text-white/40 font-normal ml-1">STX</span>
+                            </p>
+                        </div>
+                        <div className="w-px h-8 bg-white/[0.08]" />
+                        <div>
+                            <p className="text-[9px] font-bold text-white/30 uppercase tracking-widest mb-1">Revenue</p>
+                            <p className="text-xs font-bold text-white font-mono stat-value">
+                                ${formatUsd(currentStats.relayerFeeBalance)}
+                                <span className="text-white/40 font-normal ml-1">USD</span>
+                            </p>
+                        </div>
+                    </div>
+                )}
             </div>
-          ))}
+
+            {/* Metric cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {metricCards.map((card) => (
+                    <div key={card.title} className="glass-card p-6">
+                        <div className="flex items-start justify-between mb-5">
+                            <p className="text-xs font-semibold text-white/50 uppercase tracking-wider">{card.title}</p>
+                            <div className="w-8 h-8 rounded-lg bg-white/[0.05] border border-white/[0.08] flex items-center justify-center">
+                                <card.icon className="w-4 h-4 text-white/50" />
+                            </div>
+                        </div>
+                        <div className="flex items-baseline gap-2">
+                            <span className="text-3xl font-bold text-white tracking-tight stat-value">
+                                {isLoading ? (
+                                    <span className="inline-block w-16 h-8 bg-white/5 rounded animate-pulse" />
+                                ) : card.value}
+                            </span>
+                            {!isLoading && (
+                                <span className="text-sm text-white/35 font-medium">{card.unit}</span>
+                            )}
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {/* Chart */}
+            <div className="glass-card p-7">
+                <div className="flex items-center justify-between mb-8">
+                    <div>
+                        <h2 className="text-sm font-semibold text-white">Sponsorship Volume</h2>
+                        <p className="text-xs text-white/40 mt-0.5">Transactions per day</p>
+                    </div>
+                    <select className="bg-white/[0.04] border border-white/[0.08] text-white/70 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-white/20 transition-colors appearance-none">
+                        <option>Last 7 days</option>
+                        <option>Last 30 days</option>
+                    </select>
+                </div>
+
+                <div className="flex items-end justify-between gap-2 h-36 border-b border-l border-white/[0.06] px-2 pb-2 relative">
+                    {(() => {
+                        const last7Days = Array.from({ length: 7 }, (_, i) => {
+                            const d = new Date();
+                            d.setDate(d.getDate() - (6 - i));
+                            return d.toISOString().split('T')[0];
+                        });
+                        const totals = last7Days.map(date =>
+                            logs.filter(l => l.createdAt.startsWith(date)).length
+                        );
+                        const max = Math.max(...totals, 1);
+                        return totals.map((total, i) => (
+                            <div key={i} className="flex-1 flex flex-col items-center gap-1 group">
+                                <div
+                                    style={{ height: `${Math.max((total / max) * 100, 4)}%` }}
+                                    className="w-full rounded-t-sm bg-white/[0.12] group-hover:bg-white/25 transition-colors relative"
+                                >
+                                    <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-white text-black text-[10px] font-bold px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
+                                        {total} tx
+                                    </div>
+                                </div>
+                            </div>
+                        ));
+                    })()}
+                    {/* Y-axis labels */}
+                    <div className="absolute -left-8 bottom-[33%] text-[9px] text-white/20 font-mono">33%</div>
+                    <div className="absolute -left-8 bottom-[66%] text-[9px] text-white/20 font-mono">66%</div>
+                </div>
+
+                {/* X-axis */}
+                <div className="flex justify-between mt-2 px-2">
+                    {Array.from({ length: 7 }, (_, i) => {
+                        const d = new Date();
+                        d.setDate(d.getDate() - (6 - i));
+                        return (
+                            <span key={i} className="flex-1 text-center text-[9px] text-white/25 font-medium uppercase tracking-wide">
+                                {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]}
+                            </span>
+                        );
+                    })}
+                </div>
+            </div>
+
+            {/* Recent activity */}
+            <div className="glass-card">
+                <div className="px-7 py-5 border-b border-white/[0.06] flex items-center justify-between">
+                    <div>
+                        <h2 className="text-sm font-semibold text-white">Recent Activity</h2>
+                        <p className="text-xs text-white/40 mt-0.5">Latest sponsored transactions</p>
+                    </div>
+                    <TrendingUp className="w-4 h-4 text-white/20" />
+                </div>
+
+                <div className="divide-y divide-white/[0.05]">
+                    {isLoading ? (
+                        <div className="px-7 py-10 text-center text-white/30 text-sm">Loading activity…</div>
+                    ) : logs.length === 0 ? (
+                        <div className="px-7 py-10 text-center text-white/30 text-sm">No recent activity.</div>
+                    ) : logs.slice(0, 5).map((log) => (
+                        <div key={log.id} className="flex items-center justify-between px-7 py-4 hover:bg-white/[0.02] transition-colors">
+                            <div className="flex items-center gap-4">
+                                <div className="w-8 h-8 rounded-lg bg-white/[0.04] border border-white/[0.07] flex items-center justify-center flex-shrink-0">
+                                    <Activity className="w-3.5 h-3.5 text-white/40" />
+                                </div>
+                                <div>
+                                    <p className="text-sm font-semibold text-white">{log.type}</p>
+                                    <p className="text-xs text-white/40 font-mono mt-0.5">{log.txid.substring(0, 18)}…</p>
+                                </div>
+                            </div>
+                            <div className="text-right">
+                                <p className={clsx('text-xs font-bold', statusClass(log.status))}>
+                                    {log.status === 'Success' ? 'Confirmed' : log.status}
+                                </p>
+                                <p className="text-[10px] text-white/30 font-mono mt-0.5">
+                                    {new Date(log.createdAt).toLocaleTimeString()}
+                                </p>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
         </div>
-      </div>
-    </div>
-  );
+    );
 }

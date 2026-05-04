@@ -23,13 +23,10 @@ const REASON_LABELS: Record<string, string> = {
     other: 'Other',
 };
 
-// Route partnership/enterprise inquiries to the partnerships inbox
 const PARTNERSHIP_REASONS = new Set(['partnership', 'enterprise']);
 
-// Simple in-memory rate limit — one submission per IP per 10 minutes
-// For production scale, replace with Redis-backed rate limiting
 const submissionLog = new Map<string, number>();
-const RATE_LIMIT_MS = 10 * 60 * 1000; // 10 minutes
+const RATE_LIMIT_MS = 10 * 60 * 1000;
 
 function isRateLimited(ip: string): boolean {
     const last = submissionLog.get(ip);
@@ -41,7 +38,6 @@ function isRateLimited(ip: string): boolean {
 
 export async function POST(req: NextRequest) {
     try {
-        // ── Rate limiting ─────────────────────────────────────────────────
         const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
             || req.headers.get('x-real-ip')
             || 'unknown';
@@ -53,7 +49,6 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // ── Input validation ──────────────────────────────────────────────
         const body = await req.json();
         const { name, email, reason, projectUrl, message } = body;
 
@@ -78,11 +73,8 @@ export async function POST(req: NextRequest) {
         const sanitizedMessage = message.trim();
         const sanitizedProjectUrl = projectUrl?.trim() || null;
         const reasonLabel = REASON_LABELS[reason];
-
-        // Route to the right inbox
         const toEmail = PARTNERSHIP_REASONS.has(reason) ? PARTNERSHIPS_EMAIL : SUPPORT_EMAIL;
 
-        // ── Send to VelumX team ───────────────────────────────────────────
         await resend.emails.send({
             from: FROM_EMAIL,
             to: toEmail,
@@ -98,7 +90,6 @@ export async function POST(req: NextRequest) {
             }),
         });
 
-        // ── Send confirmation to sender ───────────────────────────────────
         await resend.emails.send({
             from: FROM_EMAIL,
             to: sanitizedEmail,
@@ -110,9 +101,7 @@ export async function POST(req: NextRequest) {
             }),
         });
 
-        // Record submission for rate limiting
         submissionLog.set(ip, Date.now());
-
         return NextResponse.json({ success: true });
 
     } catch (error: any) {
@@ -120,6 +109,28 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Failed to submit message' }, { status: 500 });
     }
 }
+
+// ── Shared styles ─────────────────────────────────────────────────────────────
+
+const S = {
+    outer:   'background:#f4f4f5;padding:40px 20px;',
+    card:    'background:#ffffff;border:1px solid #e4e4e7;border-radius:16px;overflow:hidden;',
+    header:  'padding:32px 40px 24px;border-bottom:1px solid #e4e4e7;background:#fafafa;',
+    body:    'padding:32px 40px;',
+    footer:  'padding:20px 40px;border-top:1px solid #e4e4e7;background:#fafafa;',
+    box:     'background:#f4f4f5;border:1px solid #e4e4e7;border-radius:10px;padding:20px;',
+    eyebrow: 'margin:0 0 4px;font-size:11px;font-weight:700;color:#71717a;letter-spacing:0.12em;text-transform:uppercase;',
+    h1:      'margin:0;font-size:22px;font-weight:700;color:#18181b;',
+    h2:      'margin:0;font-size:20px;font-weight:700;color:#18181b;',
+    body1:   'margin:0 0 16px;font-size:14px;color:#3f3f46;line-height:1.7;',
+    body2:   'margin:0;font-size:13px;color:#52525b;line-height:1.6;',
+    label:   'margin:0 0 4px;font-size:11px;font-weight:700;color:#71717a;letter-spacing:0.1em;text-transform:uppercase;',
+    value:   'margin:0;font-size:13px;color:#18181b;',
+    muted:   'margin:0;font-size:11px;color:#a1a1aa;line-height:1.6;',
+    link:    'color:#2563eb;text-decoration:none;',
+    badge:   'display:inline-block;padding:4px 12px;background:#f4f4f5;border:1px solid #e4e4e7;border-radius:6px;font-size:11px;font-weight:700;color:#3f3f46;letter-spacing:0.08em;text-transform:uppercase;',
+    btn:     'display:inline-block;padding:12px 24px;background:#18181b;color:#ffffff;font-size:13px;font-weight:700;text-decoration:none;border-radius:8px;',
+};
 
 // ── Email Templates ───────────────────────────────────────────────────────────
 
@@ -131,50 +142,49 @@ function internalTemplate(data: {
     message: string;
     source: string;
 }) {
-    return `
-<!DOCTYPE html>
+    return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#000000;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#000000;padding:40px 20px;">
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="${S.outer}">
     <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="background:#0a0a0a;border:1px solid rgba(255,255,255,0.1);border-radius:16px;overflow:hidden;">
+      <table width="600" cellpadding="0" cellspacing="0" style="${S.card}">
 
         <tr>
-          <td style="padding:32px 40px 24px;border-bottom:1px solid rgba(255,255,255,0.06);">
-            <p style="margin:0 0 4px;font-size:10px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.15em;text-transform:uppercase;">VelumX · ${escapeHtml(data.source)}</p>
-            <h1 style="margin:0;font-size:20px;font-weight:700;color:#ffffff;">New Inbound Message</h1>
+          <td style="${S.header}">
+            <p style="${S.eyebrow}">VelumX · ${escapeHtml(data.source)}</p>
+            <h1 style="${S.h2}">New Inbound Message</h1>
           </td>
         </tr>
 
         <tr>
           <td style="padding:24px 40px 0;">
-            <span style="display:inline-block;padding:4px 12px;background:rgba(167,139,250,0.1);border:1px solid rgba(167,139,250,0.2);border-radius:6px;font-size:11px;font-weight:700;color:rgba(167,139,250,0.9);letter-spacing:0.1em;text-transform:uppercase;">${escapeHtml(data.reason)}</span>
+            <span style="${S.badge}">${escapeHtml(data.reason)}</span>
           </td>
         </tr>
 
         <tr>
-          <td style="padding:24px 40px;">
+          <td style="${S.body}">
             <table width="100%" cellpadding="0" cellspacing="0">
               ${field('From', `${escapeHtml(data.name)} &lt;${escapeHtml(data.email)}&gt;`)}
-              ${data.projectUrl ? field('Project', `<a href="${escapeHtml(data.projectUrl)}" style="color:#38bdf8;text-decoration:none;">${escapeHtml(data.projectUrl)}</a>`) : ''}
+              ${data.projectUrl ? field('Project', `<a href="${escapeHtml(data.projectUrl)}" style="${S.link}">${escapeHtml(data.projectUrl)}</a>`) : ''}
             </table>
           </td>
         </tr>
 
         <tr>
           <td style="padding:0 40px 32px;">
-            <p style="margin:0 0 10px;font-size:10px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.12em;text-transform:uppercase;">Message</p>
-            <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:20px;">
-              <p style="margin:0;font-size:14px;color:rgba(255,255,255,0.7);line-height:1.7;white-space:pre-wrap;">${escapeHtml(data.message)}</p>
+            <p style="${S.label}">Message</p>
+            <div style="${S.box}">
+              <p style="margin:0;font-size:14px;color:#3f3f46;line-height:1.7;white-space:pre-wrap;">${escapeHtml(data.message)}</p>
             </div>
           </td>
         </tr>
 
         <tr>
-          <td style="padding:24px 40px;border-top:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.02);">
+          <td style="${S.footer}">
             <a href="mailto:${escapeHtml(data.email)}?subject=Re: Your VelumX inquiry"
-               style="display:inline-block;padding:12px 24px;background:#ffffff;color:#000000;font-size:13px;font-weight:700;text-decoration:none;border-radius:8px;">
+               style="${S.btn}">
               Reply to ${escapeHtml(data.name)}
             </a>
           </td>
@@ -188,52 +198,56 @@ function internalTemplate(data: {
 }
 
 function confirmationTemplate(data: { name: string; reason: string; message: string }) {
-    return `
-<!DOCTYPE html>
+    return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#000000;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#000000;padding:40px 20px;">
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="${S.outer}">
     <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="background:#0a0a0a;border:1px solid rgba(255,255,255,0.1);border-radius:16px;overflow:hidden;">
+      <table width="600" cellpadding="0" cellspacing="0" style="${S.card}">
 
         <tr>
-          <td style="padding:40px 40px 32px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.06);">
-            <p style="margin:0 0 6px;font-size:10px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.15em;text-transform:uppercase;">VelumX</p>
-            <h1 style="margin:0;font-size:22px;font-weight:700;color:#ffffff;">Message received.</h1>
+          <td style="padding:40px 40px 32px;text-align:center;border-bottom:1px solid #e4e4e7;background:#fafafa;">
+            <div style="width:48px;height:48px;background:#f4f4f5;border:1px solid #e4e4e7;border-radius:12px;margin:0 auto 20px;line-height:48px;text-align:center;">
+              <span style="font-size:22px;line-height:48px;">✓</span>
+            </div>
+            <p style="${S.eyebrow}">VelumX</p>
+            <h1 style="${S.h1}">Message received.</h1>
           </td>
         </tr>
 
         <tr>
-          <td style="padding:32px 40px;">
-            <p style="margin:0 0 20px;font-size:14px;color:rgba(255,255,255,0.5);line-height:1.7;">
+          <td style="${S.body}">
+            <p style="${S.body1}">
               Hi ${escapeHtml(data.name)}, thanks for reaching out. The VelumX team has received your message and will get back to you within 24 hours.
             </p>
 
-            <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:20px;margin-bottom:24px;">
-              <p style="margin:0 0 6px;font-size:10px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.12em;text-transform:uppercase;">Category</p>
-              <p style="margin:0 0 16px;font-size:13px;font-weight:600;color:#ffffff;">${escapeHtml(data.reason)}</p>
-              <p style="margin:0 0 6px;font-size:10px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.12em;text-transform:uppercase;">Your message</p>
-              <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.5);line-height:1.6;white-space:pre-wrap;">${escapeHtml(data.message.length > 300 ? data.message.substring(0, 300) + '...' : data.message)}</p>
+            <div style="${S.box}margin-bottom:24px;">
+              <p style="${S.label}">Category</p>
+              <p style="margin:0 0 16px;font-size:13px;font-weight:600;color:#18181b;">${escapeHtml(data.reason)}</p>
+              <p style="${S.label}">Your message</p>
+              <p style="${S.body2}">${escapeHtml(data.message.length > 300 ? data.message.substring(0, 300) + '...' : data.message)}</p>
             </div>
 
-            <p style="margin:0 0 8px;font-size:13px;color:rgba(255,255,255,0.4);">
+            <p style="margin:0 0 6px;font-size:13px;color:#52525b;">
               In the meantime, explore our documentation:
             </p>
-            <a href="https://docs.velumx.xyz" style="display:inline-block;margin-bottom:24px;font-size:13px;font-weight:600;color:#38bdf8;text-decoration:none;">
+            <a href="https://docs.velumx.xyz" style="display:inline-block;margin-bottom:24px;font-size:13px;font-weight:600;${S.link}">
               docs.velumx.xyz →
             </a>
-            <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.3);line-height:1.6;">
-              Already have an account? <a href="https://dashboard.velumx.xyz" style="color:rgba(255,255,255,0.5);text-decoration:none;">Sign in to your dashboard →</a>
+
+            <p style="margin:0;font-size:13px;color:#71717a;line-height:1.6;">
+              Already have an account?
+              <a href="https://dashboard.velumx.xyz" style="${S.link}">Sign in to your dashboard →</a>
             </p>
           </td>
         </tr>
 
         <tr>
-          <td style="padding:20px 40px;border-top:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.02);">
-            <p style="margin:0;font-size:11px;color:rgba(255,255,255,0.2);">
+          <td style="${S.footer}">
+            <p style="${S.muted}">
               VelumX · Gasless Infrastructure for Stacks ·
-              <a href="https://dashboard.velumx.xyz" style="color:rgba(255,255,255,0.3);text-decoration:none;">dashboard.velumx.xyz</a>
+              <a href="https://dashboard.velumx.xyz" style="color:#a1a1aa;text-decoration:none;">dashboard.velumx.xyz</a>
             </p>
           </td>
         </tr>
@@ -249,8 +263,8 @@ function field(label: string, value: string) {
     return `
     <tr>
       <td style="padding:0 0 14px;">
-        <p style="margin:0 0 4px;font-size:10px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.12em;text-transform:uppercase;">${label}</p>
-        <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.7);">${value}</p>
+        <p style="${S.label}">${label}</p>
+        <p style="${S.value}">${value}</p>
       </td>
     </tr>`;
 }
