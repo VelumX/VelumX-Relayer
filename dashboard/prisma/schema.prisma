@@ -17,7 +17,8 @@ model ApiKey {
   id                    String            @id @default(cuid())
   userId                String?           // Associated Supabase User ID
   name                  String
-  key                   String            @unique
+  key                   String            @unique  // plaintext — kept for backward compat, remove after migration
+  keyHash               String?           @unique  // SHA-256 hex of the raw key — primary lookup field
   status                String            @default("Active")
   sponsorshipPolicy     SponsorshipPolicy @default(DEVELOPER_SPONSORS)
   markupPercentage      Int               @default(10)

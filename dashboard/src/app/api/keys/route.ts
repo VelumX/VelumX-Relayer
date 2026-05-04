@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import prisma from "@/lib/prisma"
 import crypto from "crypto"
+import { hashApiKey } from "@/lib/hashApiKey"
 
 export async function GET(req: NextRequest) {
   try {
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest) {
       select: {
         id: true,
         name: true,
-        key: true,
+        // key is intentionally excluded — plaintext is shown once at creation only
         sponsorshipPolicy: true,
         markupPercentage: true,
         maxSponsoredTxsPerUser: true,
@@ -78,14 +79,16 @@ export async function POST(req: NextRequest) {
     }
 
     // Generate a secure random API key
-    const key = `vx_${crypto.randomBytes(32).toString("hex")}`
+    const rawKey = `vx_${crypto.randomBytes(32).toString("hex")}`
+    const keyHash = hashApiKey(rawKey);
 
     const apiKey = await (prisma.apiKey as any).create({
       data: {
         userId: user.id,
         name: name.trim(),
-        key,
-        sponsorshipPolicy: "DEVELOPER_SPONSORS", // Default as per project requirements
+        key: rawKey,      // kept for backward compat — remove after full migration
+        keyHash,          // primary lookup field going forward
+        sponsorshipPolicy: "DEVELOPER_SPONSORS",
         markupPercentage: 10,
         maxSponsoredTxsPerUser: 5,
         monthlyLimitUsd: 100.0,
@@ -93,7 +96,7 @@ export async function POST(req: NextRequest) {
       select: {
         id: true,
         name: true,
-        key: true,
+        key: true,        // returned once here — never again after this response
         sponsorshipPolicy: true,
         markupPercentage: true,
         maxSponsoredTxsPerUser: true,
@@ -106,7 +109,7 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error("Dashboard API: Failed to create API key:", error);
     return NextResponse.json(
-      { error: "Internal server error", details: error.message, stack: error.stack },
+      { error: "Internal server error" },
       { status: 500 }
     )
   }

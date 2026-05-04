@@ -10,6 +10,7 @@ import { verifySupabaseToken, AuthRequest } from './auth.js';
 import { createRateLimiters } from './middleware/rateLimiter.js';
 import { StatusSyncService } from './StatusSyncService.js';
 import { getCachedStats, setCachedStats, invalidateStatsCache, getRedisClient } from './services/RedisClient.js';
+import { hashApiKey } from './utils/hashApiKey.js';
 
 dotenv.config();
 
@@ -63,10 +64,31 @@ const validateApiKey = async (req: ApiKeyRequest, res: express.Response, next: e
         return res.status(401).json({ error: "Unauthorized" });
     }
     try {
-        const keyRecord = await (prisma.apiKey as any).findUnique({
-            where: { key: apiKey },
+        const keyHash = hashApiKey(apiKey);
+
+        // Primary lookup: by hash (new keys). Fallback: by plaintext (legacy keys not yet migrated).
+        // Once all keys have a keyHash, remove the fallback `|| { key: apiKey }` branch.
+        let keyRecord = await (prisma.apiKey as any).findUnique({
+            where: { keyHash },
             select: { id: true, userId: true, status: true }
         });
+
+        if (!keyRecord) {
+            // Legacy fallback — key was created before hashing was introduced
+            keyRecord = await (prisma.apiKey as any).findUnique({
+                where: { key: apiKey },
+                select: { id: true, userId: true, status: true }
+            });
+
+            // Opportunistically backfill the hash so this key migrates on next use
+            if (keyRecord && keyRecord.status === 'Active') {
+                (prisma.apiKey as any).update({
+                    where: { id: keyRecord.id },
+                    data: { keyHash }
+                }).catch((e: Error) => console.error("Key hash backfill failed:", e.message));
+            }
+        }
+
         // Use a single constant-time response for both "not found" and "revoked"
         // to prevent timing-based enumeration of valid keys
         if (!keyRecord || keyRecord.status !== 'Active') {
@@ -92,7 +114,8 @@ app.get('/api/v1/config', validateApiKey, async (req: ApiKeyRequest, res: expres
             sponsorshipPolicy: apiKey?.sponsorshipPolicy || 'USER_PAYS'
         });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        console.error("Config Error:", error);
+        res.status(500).json({ error: "Internal server error" });
     }
 });
 
@@ -268,7 +291,8 @@ app.get('/api/dashboard/keys', verifySupabaseToken, rateLimiters.dashboard.middl
         const keys = await (prisma.apiKey as any).findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
         res.json(keys);
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        console.error("Dashboard Keys Error:", error);
+        res.status(500).json({ error: "Internal server error" });
     }
 });
 
@@ -284,10 +308,12 @@ app.post('/api/dashboard/keys', verifySupabaseToken, rateLimiters.dashboard.midd
 
         // Use cryptographically secure random bytes — never Math.random() for secrets
         const rawKey = `sgal_live_${crypto.randomBytes(24).toString('hex')}`;
+        const keyHash = hashApiKey(rawKey);
         const newKey = await (prisma.apiKey as any).create({
-            data: { name: name.trim(), key: rawKey, status: 'Active', userId }
+            data: { name: name.trim(), key: rawKey, keyHash, status: 'Active', userId }
         });
-        res.json(newKey);
+        // Return the plaintext key once — it is never retrievable again after this response
+        res.json({ ...newKey, key: rawKey });
     } catch (error: any) {
         console.error("Create Key Error:", error);
         res.status(500).json({ error: "Failed to create key" });

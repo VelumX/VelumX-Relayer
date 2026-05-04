@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error("Dashboard API (Adapters): Failed to create adapter:", error);
     return NextResponse.json(
-      { error: "Internal server error", details: error.message },
+      { error: "Internal server error" },
       { status: 500 }
     )
   }
