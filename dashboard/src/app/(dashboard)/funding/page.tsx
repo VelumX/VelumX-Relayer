@@ -1,13 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useUser } from '@/components/providers/SessionProvider';
-import { Wallet, RefreshCcw, History, Activity } from 'lucide-react';
+import { useState } from 'react';
+import { Wallet, RefreshCcw, Activity } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useWallet } from '@/components/providers/WalletContext';
-import { RELAYER_URL } from '@/lib/config';
+import { useStats } from '@/components/providers/StatsProvider';
 
-// Format a USD value with enough precision to show small amounts
 function formatUsd(value: string | number): string {
   const n = parseFloat(value as string) || 0;
   if (n === 0) return '0.00';
@@ -17,67 +15,17 @@ function formatUsd(value: string | number): string {
 }
 
 export default function FundingPage() {
-    const [isClient, setIsClient] = useState(false);
-    const { user, loading: userLoading } = useUser();
     const { network } = useWallet();
-    const [stats, setStats] = useState({
-        relayerAddress: 'Loading...',
-        relayerStxBalance: '0',
-        relayerFeeBalance: '0',
-    });
-    const [logs, setLogs] = useState<any[]>([]);
-    const [adapters, setAdapters] = useState<any[]>([]);
-    const [isFetching, setIsFetching] = useState(true);
+    const { stats, logs, adapters, isLoading, refresh } = useStats();
+
+    const s = stats.networks?.[network] || {};
+    const relayerAddress = s.relayerAddress || 'Not Configured';
+    const relayerStxBalance = (parseInt(s.relayerStxBalance || '0') / 1_000_000).toFixed(2);
+    const relayerFeeBalance = formatUsd(s.relayerFeeBalance || '0');
+
     const [isAdding, setIsAdding] = useState(false);
     const [showAddModal, setShowAddModal] = useState(false);
     const [newAdapter, setNewAdapter] = useState({ name: '', address: '', description: '' });
-
-    const fetchAllData = async () => {
-        if (!user) return;
-        setIsFetching(true);
-        try {
-            const supabase = (await import('@/lib/supabase/client')).createClient();
-            const { data: { session } } = await supabase.auth.getSession();
-            const token = session?.access_token;
-            if (!token) return;
-
-            // Clear cache
-            await fetch(`${RELAYER_URL}/api/dashboard/cache-clear`, {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
-            }).catch(() => {});
-
-            const [statsRes, logsRes, adaptersRes] = await Promise.all([
-                fetch(`${RELAYER_URL}/api/dashboard/stats`, { cache: 'no-store', headers: { 'Authorization': `Bearer ${token}` } }),
-                fetch(`${RELAYER_URL}/api/dashboard/logs?network=${network}`, { cache: 'no-store', headers: { 'Authorization': `Bearer ${token}` } }),
-                fetch(`/api/adapters`, { cache: 'no-store' }),
-            ]);
-
-            if (statsRes.ok) {
-                const data = await statsRes.json();
-                const s = data.networks?.[network] || {};
-                setStats({
-                    relayerAddress: s.relayerAddress || 'Not Configured',
-                    relayerStxBalance: (parseInt(s.relayerStxBalance || '0') / 1_000_000).toFixed(2),
-                    relayerFeeBalance: formatUsd(s.relayerFeeBalance || '0'),
-                });
-            }
-
-            if (logsRes.ok) {
-                const logsData = await logsRes.json();
-                setLogs(Array.isArray(logsData) ? logsData.slice(0, 5) : []);
-            }
-
-            if (adaptersRes.ok) {
-                const data = await adaptersRes.json();
-                setAdapters(data.adapters || []);
-            }
-        } catch (error) {
-            console.error('Error fetching data:', error);
-        } finally {
-            setIsFetching(false);
-        }
-    };
 
     const handleAddAdapter = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -88,17 +36,16 @@ export default function FundingPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(newAdapter),
             });
-
             if (res.ok) {
                 toast.success('Adapter registered successfully!');
                 setShowAddModal(false);
                 setNewAdapter({ name: '', address: '', description: '' });
-                fetchAllData();
+                await refresh();
             } else {
                 const err = await res.json();
                 toast.error(err.error || 'Failed to register adapter');
             }
-        } catch (error) {
+        } catch {
             toast.error('Connection failed');
         } finally {
             setIsAdding(false);
@@ -107,24 +54,16 @@ export default function FundingPage() {
 
     const handleDeleteAdapter = async (id: string) => {
         if (!confirm('Are you sure you want to remove this adapter?')) return;
-        
         try {
             const res = await fetch(`/api/adapters/${id}`, { method: 'DELETE' });
             if (res.ok) {
                 toast.success('Adapter removed');
-                fetchAllData();
+                await refresh();
             }
-        } catch (error) {
+        } catch {
             toast.error('Failed to remove adapter');
         }
     };
-
-    useEffect(() => {
-        setIsClient(true);
-        if (!userLoading) fetchAllData();
-    }, [network, user, userLoading]);
-
-    if (!isClient) return null;
 
     return (
         <div className="space-y-8 pb-12">
@@ -147,13 +86,13 @@ export default function FundingPage() {
                                     <p className="text-[10px] text-white/40 uppercase font-bold tracking-tight">Used to pay network fees</p>
                                 </div>
                             </div>
-                            {parseFloat(stats.relayerStxBalance) < 10 && (
+                            {parseFloat(relayerStxBalance) < 10 && (
                                 <span className="px-2 py-1 rounded bg-rose-500/20 text-rose-400 text-[10px] font-bold border border-rose-500/20 uppercase animate-pulse">Low Funds</span>
                             )}
                         </div>
                         <div className="mb-8">
                             <div className="flex items-baseline gap-2">
-                                <span className="text-5xl font-black text-white font-mono">{isFetching ? '...' : stats.relayerStxBalance}</span>
+                                <span className="text-5xl font-black text-white font-mono">{isLoading ? '...' : relayerStxBalance}</span>
                                 <span className="text-lg text-white/40 font-bold">STX</span>
                             </div>
                         </div>
@@ -162,9 +101,9 @@ export default function FundingPage() {
                         <div className="p-4 bg-black rounded-xl border border-white/5">
                             <p className="text-[10px] text-white/20 uppercase font-bold mb-2">Relayer Hot Wallet Address</p>
                             <div className="flex items-center justify-between gap-2">
-                                <code className="text-xs text-white/60 truncate font-mono">{stats.relayerAddress}</code>
+                                <code className="text-xs text-white/60 truncate font-mono">{relayerAddress}</code>
                                 <button
-                                    onClick={() => navigator.clipboard.writeText(stats.relayerAddress)}
+                                    onClick={() => navigator.clipboard.writeText(relayerAddress)}
                                     className="text-[10px] font-bold text-white/40 hover:text-white uppercase transition-colors"
                                 >
                                     Copy
@@ -188,7 +127,7 @@ export default function FundingPage() {
                         </div>
                         <div className="mb-8">
                             <div className="flex baseline gap-2">
-                                <span className="text-5xl font-black text-white font-mono">{isFetching ? '...' : stats.relayerFeeBalance}</span>
+                                <span className="text-5xl font-black text-white font-mono">{isLoading ? '...' : relayerFeeBalance}</span>
                                 <span className="text-lg text-white/40 font-bold">USD</span>
                             </div>
                         </div>
@@ -218,9 +157,10 @@ export default function FundingPage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {isFetching ? (
+                    {isLoading ? (
                         <div className="col-span-full text-center py-12 text-white/10 text-[10px] font-bold uppercase tracking-widest animate-pulse">
                             Loading Adapters...
+                        </div>
                         </div>
                     ) : adapters.length === 0 ? (
                         <div className="col-span-full text-center py-16 border border-dashed border-white/5 rounded-2xl">

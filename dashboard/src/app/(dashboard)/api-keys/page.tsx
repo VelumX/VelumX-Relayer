@@ -197,7 +197,7 @@ export default function ApiKeysPage() {
             <div className="flex justify-between items-end">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight text-white mb-2">API Keys</h1>
-                    <p className="text-white/40 text-sm">Manage your secret keys for authenticating with VelumX SDK.</p>
+                    <p className="text-white/60 text-sm">Manage your secret keys for authenticating with VelumX SDK.</p>
                 </div>
 
                 <div className="flex items-center gap-4">
@@ -223,7 +223,7 @@ export default function ApiKeysPage() {
                     <ShieldAlert className="w-5 h-5 flex-shrink-0 mt-0.5 text-white/60" />
                     <div>
                         <h3 className="font-bold text-white mb-2">Keep your keys secure</h3>
-                        <p className="text-sm text-white/40 leading-relaxed">
+                        <p className="text-sm text-white/60 leading-relaxed">
                             Secret keys grant access to your paymaster infrastructure. 
                             Never share your secret keys or expose them in client-side code. 
                             Use them only on your secure backend server.
@@ -306,7 +306,7 @@ export default function ApiKeysPage() {
                             </div>
                         </div>
                     ) : (
-                        <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-lg text-xs text-rose-400">
+                        <div className="p-4 bg-white/[0.03] border border-white/10 rounded-lg text-xs text-white/50">
                             Failed to load relayer wallet. Please check your relayer connection.
                         </div>
                     )}
@@ -343,15 +343,15 @@ export default function ApiKeysPage() {
             )}
 
             {newlyCreatedKey && (
-                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-6">
+                <div className="bg-white/[0.04] border border-white/10 rounded-xl p-6">
                     <div className="flex items-start gap-4">
-                        <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
-                            <KeyRound className="w-5 h-5 text-emerald-400" />
+                        <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0">
+                            <KeyRound className="w-5 h-5 text-white" />
                         </div>
                         <div className="flex-1">
                             <h3 className="font-bold text-white mb-2">Your new API key</h3>
                             <p className="text-sm text-white/60 mb-4">
-                                Make sure to copy your API key now. You won't be able to see it again!
+                                Copy your API key now. You won't be able to see it again.
                             </p>
                             <div className="flex items-center gap-2">
                                 <code className="flex-1 px-4 py-3 bg-black/40 rounded-lg text-sm text-white font-mono border border-white/10">
@@ -381,10 +381,10 @@ export default function ApiKeysPage() {
                     <div className="bg-[#0a0a0a] border border-white/10 rounded-xl p-6 max-w-md w-full">
                         <h3 className="text-xl font-bold text-white mb-4">Generate New API Key</h3>
                         <div className="space-y-4">
-                            <div className="flex items-start gap-3 px-4 py-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
-                                <ShieldAlert className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-                                <p className="text-xs text-amber-300/80 leading-relaxed">
-                                    Your secret key will only be shown <span className="font-bold text-amber-300">once</span> at creation. Copy and store it somewhere safe — it cannot be retrieved again.
+                            <div className="flex items-start gap-3 px-4 py-3 bg-white/[0.04] border border-white/10 rounded-lg">
+                                <ShieldAlert className="w-4 h-4 text-white/60 flex-shrink-0 mt-0.5" />
+                                <p className="text-xs text-white/70 leading-relaxed">
+                                    Your secret key will only be shown <span className="font-bold text-white">once</span> at creation. Copy and store it somewhere safe — it cannot be retrieved again.
                                 </p>
                             </div>
                             <div>
@@ -486,11 +486,11 @@ export default function ApiKeysPage() {
                                         </div>
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
-                                        <span className="inline-flex items-center px-3 py-1 rounded-full text-[10px] font-bold border bg-emerald-400/10 text-emerald-400 border-emerald-400/20">
+                                        <span className="inline-flex items-center px-3 py-1 rounded-full text-[10px] font-bold border bg-white/5 text-white border-white/10">
                                             ACTIVE
                                         </span>
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-xs text-white/40 font-mono">
+                                    <td className="px-6 py-4 whitespace-nowrap text-xs text-white/60 font-mono">
                                         {new Date(k.createdAt).toLocaleDateString()}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
