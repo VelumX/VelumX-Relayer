@@ -144,7 +144,7 @@ export default function DashboardOverview() {
                     </select>
                 </div>
 
-                <div className="flex items-end justify-between gap-2 h-36 border-b border-l border-white/[0.06] px-2 pb-2 relative">
+                <div className="flex items-end justify-between gap-2 h-40 border-b border-l border-white/[0.06] px-2 pb-2 relative">
                     {(() => {
                         const last7Days = Array.from({ length: 7 }, (_, i) => {
                             const d = new Date();
@@ -156,10 +156,10 @@ export default function DashboardOverview() {
                         );
                         const max = Math.max(...totals, 1);
                         return totals.map((total, i) => (
-                            <div key={i} className="flex-1 flex flex-col items-center gap-1 group">
+                            <div key={i} className="flex-1 h-full flex items-end group">
                                 <div
-                                    style={{ height: `${Math.max((total / max) * 100, 4)}%` }}
-                                    className="w-full rounded-t-sm bg-white/[0.12] group-hover:bg-white/25 transition-colors relative"
+                                    style={{ height: `${Math.max((total / max) * 100, 3)}%` }}
+                                    className="w-full rounded-t-sm bg-white/[0.15] group-hover:bg-white/30 transition-colors relative"
                                 >
                                     <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-white text-black text-[10px] font-bold px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
                                         {total} tx
