@@ -161,7 +161,6 @@ export default function FundingPage() {
                         <div className="col-span-full text-center py-12 text-white/10 text-[10px] font-bold uppercase tracking-widest animate-pulse">
                             Loading Adapters...
                         </div>
-                        </div>
                     ) : adapters.length === 0 ? (
                         <div className="col-span-full text-center py-16 border border-dashed border-white/5 rounded-2xl">
                             <p className="text-white/20 text-[10px] font-bold uppercase tracking-widest mb-4">No Adapters Registered</p>
