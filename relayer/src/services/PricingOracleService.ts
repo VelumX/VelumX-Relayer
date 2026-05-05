@@ -93,6 +93,7 @@ export class PricingOracleService {
     private bitflow: BitflowSDK;
     private readonly cache = new PriceCache(5 * 60 * 1000); // 5 min TTL
     private metadataCache: Map<string, { symbol: string, decimals: number }> = new Map();
+    private readonly hiroHeaders: Record<string, string>;
 
     private readonly KNOWN_DECIMALS: Record<string, number> = {
         'token-alex': 8, 'age000-governance-token': 8,
@@ -140,6 +141,13 @@ export class PricingOracleService {
             BITFLOW_API_HOST: 'https://api.bitflowapis.finance',
             READONLY_CALL_API_HOST: 'https://node.bitflowapis.finance'
         });
+        const hiroApiKey = process.env.HIRO_API_KEY;
+        this.hiroHeaders = hiroApiKey ? { 'x-api-key': hiroApiKey } : {};
+        if (hiroApiKey) {
+            console.log('[Oracle] Hiro API key loaded — using authenticated requests.');
+        } else {
+            console.warn('[Oracle] HIRO_API_KEY not set — using unauthenticated Hiro requests (rate limit: 50 req/min).');
+        }
     }
 
     public async getTokenMetadata(token: string): Promise<{ symbol: string, decimals: number }> {
@@ -180,7 +188,10 @@ export class PricingOracleService {
         if (token.includes('.')) {
             try {
                 const [addr, name] = token.split('.');
-                const res = await fetch(`https://api.hiro.so/metadata/v1/ft/${addr}.${name}`, { signal: AbortSignal.timeout(3000) });
+                const res = await fetch(`https://api.hiro.so/metadata/v1/ft/${addr}.${name}`, {
+                        signal: AbortSignal.timeout(3000),
+                        headers: this.hiroHeaders,
+                    });
                 if (res.ok) {
                     const data = await res.json();
                     if (data.decimals !== undefined) {
@@ -505,14 +516,16 @@ export class PricingOracleService {
         const cached = await this.cache.get(cacheKey);
         if (cached !== null) return cached;
 
-        // Use the public Stacks Foundation node — no API key, no rate limits
+        // Hiro API — works from this server, rate limit is 50 req/min but we cache
+        // for 5 minutes so we make at most 1 call per cache window. No risk.
         const nodeBase = network === 'mainnet'
-            ? 'https://stacks-node-api.mainnet.stacks.co'
-            : 'https://stacks-node-api.testnet.stacks.co';
+            ? 'https://api.mainnet.hiro.so'
+            : 'https://api.testnet.hiro.so';
 
         try {
             const res = await fetch(`${nodeBase}/v2/fees/transfer`, {
                 signal: AbortSignal.timeout(3000),
+                headers: this.hiroHeaders,
             });
 
             if (res.ok) {

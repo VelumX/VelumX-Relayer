@@ -186,7 +186,12 @@ export class PaymasterService {
     public async validateUserBalance(userAddress: string, tokenPrincipal: string, requiredAmount: bigint, network: 'mainnet' | 'testnet' = 'mainnet'): Promise<boolean> {
         try {
             const apiBase = network === 'mainnet' ? 'https://api.mainnet.hiro.so' : 'https://api.testnet.hiro.so';
-            const res = await fetch(`${apiBase}/extended/v1/address/${userAddress}/balances`, { signal: AbortSignal.timeout(5000) });
+            const hiroApiKey = process.env.HIRO_API_KEY;
+            const headers: Record<string, string> = hiroApiKey ? { 'x-api-key': hiroApiKey } : {};
+            const res = await fetch(`${apiBase}/extended/v1/address/${userAddress}/balances`, {
+                signal: AbortSignal.timeout(5000),
+                headers,
+            });
 
             if (!res.ok) return true; // Default to true on API error to avoid blocking legit txs
 
