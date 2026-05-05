@@ -494,7 +494,11 @@ export class PaymasterService {
                 // Fee Amount Introspection: Try to detect which function was called
                 if (transaction.payload.payloadType === 2) { // 2 = ContractCall (matches stacks-transactions)
                     const payload = transaction.payload as any;
-                    const functionName = payload.functionName;
+                    // @stacks/transactions v7+ wraps functionName in a LengthPrefixedString object
+                    // — always coerce to a plain string before comparing
+                    const functionName: string = typeof payload.functionName === 'string'
+                        ? payload.functionName
+                        : (payload.functionName?.content ?? payload.functionName?.toString() ?? '');
                     const args = payload.functionArgs;
 
                     console.log(`Relayer: Introspecting fee for ${functionName}...`);
@@ -584,8 +588,28 @@ export class PaymasterService {
                 fee: RELAYER_FEE,
             });
 
-            // Broadcast
-            const response = await broadcastTransaction({ transaction: signedTx, network: stxNetwork });
+            // Broadcast — try primary node, fall back to secondary if we get a non-JSON response
+            let response: any;
+            const broadcastNetworks = [
+                stxNetwork,
+                // Fallback: use the public Stacks node directly
+                targetNetwork === 'mainnet'
+                    ? { ...stxNetwork, coreApiUrl: 'https://stacks-node-api.mainnet.stacks.co' }
+                    : { ...stxNetwork, coreApiUrl: 'https://stacks-node-api.testnet.stacks.co' },
+            ];
+
+            let lastBroadcastError: Error | null = null;
+            for (const net of broadcastNetworks) {
+                try {
+                    response = await broadcastTransaction({ transaction: signedTx, network: net });
+                    lastBroadcastError = null;
+                    break;
+                } catch (broadcastErr: any) {
+                    lastBroadcastError = broadcastErr;
+                    console.warn(`[Broadcast] Node ${(net as any).coreApiUrl ?? 'primary'} failed: ${broadcastErr.message} — trying fallback...`);
+                }
+            }
+            if (lastBroadcastError) throw lastBroadcastError;
 
             if ('error' in response) {
                 const errorMsg = response.reason || (response as any).message || JSON.stringify(response);
