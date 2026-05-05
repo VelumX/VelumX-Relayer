@@ -269,10 +269,11 @@ export class PaymasterService {
         const estimatedGas = intent.estimatedGas || 100000;
         const markupFactor = 1 + (apiKey.markupPercentage / 100);
 
-        // Actual STX gas cost: relayer pays 5,000 microSTX (0.005 STX) per tx
-        const RELAYER_STX_FEE = 0.005; // STX
+        // Dynamic STX gas cost: query the Stacks node for the current fee rate
+        const networkFeeMicroStx = await this.pricingOracle.getNetworkFeeRate(intent.network || 'mainnet');
+        const RELAYER_STX_FEE = networkFeeMicroStx / 1_000_000; // convert microSTX → STX
         const stxUsdPrice = await this.pricingOracle.getStxPrice();
-        const actualGasCostUsd = stxUsdPrice ? RELAYER_STX_FEE * stxUsdPrice : 0.005;
+        const actualGasCostUsd = stxUsdPrice ? RELAYER_STX_FEE * stxUsdPrice : RELAYER_STX_FEE;
 
         // Apply a 20% minimum margin on top of actual gas cost, then apply developer markup
         const MIN_MARGIN = 1.2;
@@ -434,8 +435,9 @@ export class PaymasterService {
                         }
                     });
 
-                    // Each sponsored tx costs 0.005 STX (5000 microSTX)
-                    const STX_PER_TX = 0.005;
+                    // Dynamic cost per tx: query the current network fee rate
+                    const networkFeeMicroStx = await this.pricingOracle.getNetworkFeeRate('mainnet');
+                    const STX_PER_TX = networkFeeMicroStx / 1_000_000; // microSTX → STX
                     const stxPrice = await this.pricingOracle.getStxPrice() || 0;
                     const actualMonthlySpendUsd = monthlyTxCount * STX_PER_TX * stxPrice;
 
@@ -571,8 +573,9 @@ export class PaymasterService {
                 }
             }
 
-            // Sign as sponsor
-            const RELAYER_FEE = 5000n; // 0.005 STX (microSTX)
+            // Sign as sponsor — use dynamic network fee rate
+            const networkFeeMicroStx = await this.pricingOracle.getNetworkFeeRate(targetNetwork);
+            const RELAYER_FEE = BigInt(networkFeeMicroStx);
 
             const signedTx = await sponsorTransaction({
                 transaction,

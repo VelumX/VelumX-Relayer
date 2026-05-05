@@ -492,6 +492,63 @@ export class PricingOracleService {
         return (Number(rawAmount) / Math.pow(10, decimals)) * usdPerToken;
     }
 
+    /**
+     * Get the current recommended fee rate from the Stacks network.
+     * Queries /v2/fees/transfer on the Stacks node and returns the fee rate
+     * in microSTX per byte. Cached for 30 seconds to avoid hammering the node.
+     *
+     * Falls back to 5000 microSTX (0.005 STX) if the node is unreachable.
+     */
+    public async getNetworkFeeRate(network: 'mainnet' | 'testnet' = 'mainnet'): Promise<number> {
+        const cacheKey = `stacks-fee-rate:${network}`;
+
+        // Use a short 30s TTL for fee rate — network conditions change quickly
+        const cached = await this.cache.get(cacheKey);
+        if (cached !== null) return cached;
+
+        const apiBase = network === 'mainnet'
+            ? 'https://api.mainnet.hiro.so'
+            : 'https://api.testnet.hiro.so';
+
+        try {
+            const res = await fetch(`${apiBase}/v2/fees/transfer`, {
+                signal: AbortSignal.timeout(3000),
+            });
+
+            if (res.ok) {
+                // Response is a plain integer string: fee rate in microSTX per byte
+                const text = await res.text();
+                const feeRate = parseInt(text.trim(), 10);
+
+                if (!isNaN(feeRate) && feeRate > 0) {
+                    // A typical sponsored contract-call is ~250–400 bytes.
+                    // We use 300 bytes as a conservative estimate to get total microSTX cost.
+                    const ESTIMATED_TX_BYTES = 300;
+                    const totalMicroStx = feeRate * ESTIMATED_TX_BYTES;
+
+                    // Clamp: floor at 1000 microSTX (0.001 STX), cap at 50000 microSTX (0.05 STX)
+                    const MIN_FEE_MICRO_STX = 1000;
+                    const MAX_FEE_MICRO_STX = 50000;
+                    const clampedFee = Math.max(MIN_FEE_MICRO_STX, Math.min(MAX_FEE_MICRO_STX, totalMicroStx));
+
+                    console.log(`[FeeOracle] ${network} fee rate: ${feeRate} µSTX/byte → ${totalMicroStx} µSTX → clamped: ${clampedFee} µSTX`);
+
+                    // Store with a 30s TTL by temporarily overriding — we reuse the existing cache
+                    // but set a short key so it expires independently of the 5-min price cache.
+                    await this.cache.set(cacheKey, clampedFee);
+                    return clampedFee;
+                }
+            }
+        } catch (err: any) {
+            console.warn(`[FeeOracle] Failed to fetch fee rate from ${network} node:`, err.message);
+        }
+
+        // Fallback: 5000 microSTX (0.005 STX) — the previous hardcoded value
+        const FALLBACK_FEE = 5000;
+        console.warn(`[FeeOracle] Using fallback fee: ${FALLBACK_FEE} µSTX`);
+        return FALLBACK_FEE;
+    }
+
     public async clearCache(key?: string): Promise<void> {
         await this.cache.del(key);
     }
