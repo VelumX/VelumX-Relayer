@@ -86,12 +86,12 @@ class PriceCache {
  * Pricing Oracle Service
  * Token price source order: Binance (CEX, most accurate) → ALEX SDK (DEX) → CoinGecko
  * STX price source order: Binance → CoinCap → CoinGecko → ALEX SDK (on-chain fallback)
- * Cache: Redis (5 min TTL) with in-memory fallback
+ * Cache: Redis (30 sec TTL) with in-memory fallback
  */
 export class PricingOracleService {
     private alex: AlexSDK;
     private bitflow: BitflowSDK;
-    private readonly cache = new PriceCache(5 * 60 * 1000); // 5 min TTL
+    private readonly cache = new PriceCache(30 * 1000); // 30 sec TTL — prices move fast
     private metadataCache: Map<string, { symbol: string, decimals: number }> = new Map();
     private readonly hiroHeaders: Record<string, string>;
 
@@ -517,7 +517,7 @@ export class PricingOracleService {
         if (cached !== null) return cached;
 
         // Hiro API — works from this server, rate limit is 50 req/min but we cache
-        // for 5 minutes so we make at most 1 call per cache window. No risk.
+        // for 30 seconds so we make at most 2 calls per minute. No risk.
         const nodeBase = network === 'mainnet'
             ? 'https://api.mainnet.hiro.so'
             : 'https://api.testnet.hiro.so';
