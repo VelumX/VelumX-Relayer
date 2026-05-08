@@ -131,6 +131,34 @@ const { txid } = await velumx.sponsor(signResult.transaction, {
 
 ---
 
+## Batch Sponsorship — DEVELOPER_SPONSORS
+
+Sponsor up to **25 transactions in a single API call**. Each transaction is processed independently — one failure does not abort the rest.
+
+```typescript
+const result = await velumx.sponsorBatch([
+  { txHex: signedTx1 },
+  { txHex: signedTx2 },
+  { txHex: signedTx3 },
+]);
+
+// Check per-item results
+result.results.forEach(item => {
+  if ('error' in item) {
+    console.error(`TX ${item.index} failed:`, item.error);
+  } else {
+    console.log(`TX ${item.index} sponsored:`, item.txid);
+  }
+});
+
+console.log(result.summary);
+// { total: 3, succeeded: 2, failed: 1 }
+```
+
+Useful for airdrops, processing queued transactions, or executing a sequence of contract calls on behalf of multiple users in one shot.
+
+---
+
 ## API Reference
 
 ### `new VelumXClient(config)`
@@ -155,6 +183,28 @@ const { txid } = await velumx.sponsor(signedTxHex, {
 ```
 
 Throws `RelayerError` if the relayer rejects the transaction.
+
+---
+
+### `velumx.sponsorBatch(transactions, options?)`
+
+Sponsors up to 25 transactions in a single call. Always returns HTTP 200 — check each item's `error` field for per-item failures.
+
+```typescript
+const result = await velumx.sponsorBatch(
+  [
+    { txHex: signedTx1 },
+    { txHex: signedTx2, feeAmount: '250000' }, // feeAmount only for USER_PAYS
+  ],
+  { network: 'mainnet' } // optional
+);
+// {
+//   results: Array<{ index, txid, status } | { index, error }>,
+//   summary: { total, succeeded, failed }
+// }
+```
+
+Throws `RelayerError` if the batch request itself fails (not per-item failures).
 
 ---
 
@@ -209,6 +259,25 @@ interface FeeEstimateResult {
 
 interface SponsorResult {
   txid: string;
+  status: string;
+}
+
+interface BatchSponsorItem {
+  txHex: string;
+  feeAmount?: string; // omit for DEVELOPER_SPONSORS
+}
+
+type BatchSponsorItemResult =
+  | ({ index: number } & SponsorResult)
+  | { index: number; error: string };
+
+interface BatchSponsorResult {
+  results: BatchSponsorItemResult[];
+  summary: {
+    total: number;
+    succeeded: number;
+    failed: number;
+  };
 }
 
 class RelayerError extends Error {

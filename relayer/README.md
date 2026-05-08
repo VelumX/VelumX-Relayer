@@ -50,7 +50,7 @@ Every developer gets a unique relayer address derived from a master key using HD
 
 ## API Reference
 
-### `POST /api/v1/sponsor`
+### `POST /api/v1/broadcast`
 
 Co-signs and broadcasts a signed sponsored transaction.
 
@@ -73,11 +73,48 @@ Content-Type: application/json
 **Response:**
 ```json
 {
-  "txid": "0x..."
+  "txid": "0x...",
+  "status": "sponsored"
 }
 ```
 
 `feeToken` and `feeAmount` are optional — omit for `DEVELOPER_SPONSORS` policy.
+
+---
+
+### `POST /api/v1/broadcast/batch`
+
+Co-signs and broadcasts up to **25 sponsored transactions in a single call**. Each transaction is processed concurrently — one failure does not abort the rest. Always returns HTTP 200; check each item's `error` field for per-item failures.
+
+**Headers:**
+```
+x-api-key: YOUR_API_KEY
+Content-Type: application/json
+```
+
+**Body:**
+```json
+{
+  "transactions": [
+    { "txHex": "0x..." },
+    { "txHex": "0x...", "feeAmount": "250000" }
+  ],
+  "userId": "optional-user-id"
+}
+```
+
+**Response:**
+```json
+{
+  "results": [
+    { "index": 0, "txid": "0x...", "status": "sponsored" },
+    { "index": 1, "error": "Transaction already processed (replay detected)" }
+  ],
+  "summary": { "total": 2, "succeeded": 1, "failed": 1 }
+}
+```
+
+**Rate limits:** 5 batch calls/min per API key, 10/min per IP (tighter than single broadcast because one call can sponsor up to 25 transactions).
 
 ---
 
@@ -144,7 +181,7 @@ The developer's relayer pays STX gas. Users pay nothing. The relayer co-signs an
 ### USER_PAYS
 The user pays a SIP-010 token fee via a paymaster contract the developer deploys. The relayer validates the fee parameters before co-signing.
 
-Both policies use the same `POST /api/v1/sponsor` endpoint — the difference is whether `feeToken` and `feeAmount` are included.
+Both policies use the same `POST /api/v1/broadcast` endpoint — the difference is whether `feeToken` and `feeAmount` are included. Both also support batch sponsorship via `POST /api/v1/broadcast/batch`.
 
 ---
 
