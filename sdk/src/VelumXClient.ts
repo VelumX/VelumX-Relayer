@@ -7,6 +7,8 @@ import {
     SponsorOptions,
     FeeEstimateResult,
     SponsorResult,
+    BatchSponsorItem,
+    BatchSponsorResult,
     ContractCallParams,
     RelayerError,
 } from './types';
@@ -128,10 +130,75 @@ export class VelumXClient {
     }
 
     /**
+     * Sponsor multiple signed Stacks transactions in a single API call.
+     *
+     * Max batch size: 25 transactions per call.
+     * Each transaction is processed independently — one failure does NOT abort the rest.
+     * Always returns 200 — check each item's `error` field for per-item failures.
+     *
+     * @example DEVELOPER_SPONSORS (user pays nothing)
+     * ```ts
+     * const result = await velumx.sponsorBatch([
+     *   { txHex: signedTx1 },
+     *   { txHex: signedTx2 },
+     *   { txHex: signedTx3 },
+     * ]);
+     *
+     * result.results.forEach(item => {
+     *   if ('error' in item) {
+     *     console.error(`TX ${item.index} failed:`, item.error);
+     *   } else {
+     *     console.log(`TX ${item.index} sponsored:`, item.txid);
+     *   }
+     * });
+     * // { total: 3, succeeded: 2, failed: 1 }
+     * ```
+     *
+     * @example USER_PAYS (user pays fee in SIP-010 token)
+     * ```ts
+     * const estimate = await velumx.estimateFee({ feeToken: 'SP...aeusdc' });
+     *
+     * const result = await velumx.sponsorBatch([
+     *   { txHex: signedTx1, feeAmount: estimate.maxFee },
+     *   { txHex: signedTx2, feeAmount: estimate.maxFee },
+     * ]);
+     * ```
+     *
+     * @throws {RelayerError} if the batch request itself fails (not per-item failures)
+     */
+    public async sponsorBatch(
+        transactions: BatchSponsorItem[],
+        options?: { userId?: string; network?: 'mainnet' | 'testnet' }
+    ): Promise<BatchSponsorResult> {
+        if (!Array.isArray(transactions) || transactions.length === 0) {
+            throw new RelayerError('transactions must be a non-empty array');
+        }
+        if (transactions.length > 25) {
+            throw new RelayerError('Batch size exceeds maximum of 25 transactions');
+        }
+
+        const response = await fetch(`${this.relayerUrl}/broadcast/batch`, {
+            method: 'POST',
+            headers: this.headers(),
+            body: JSON.stringify({
+                transactions,
+                userId: options?.userId,
+                network: options?.network || this.config.network,
+            }),
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({ error: response.statusText })) as any;
+            throw new RelayerError(err.error || err.message || response.statusText);
+        }
+
+        return response.json() as Promise<BatchSponsorResult>;
+    }
+
+    /**
      * Fetch the developer's relayer configuration.
      * Returns supported gas tokens and sponsorship policy for this API key.
-     */
-    public async getConfig(): Promise<{
+     */    public async getConfig(): Promise<{
         supportedGasTokens: string[];
         sponsorshipPolicy: 'DEVELOPER_SPONSORS' | 'USER_PAYS';
     }> {

@@ -93,6 +93,38 @@ export interface SponsorResult {
 }
 
 /**
+ * A single item in a sponsorBatch() call
+ */
+export interface BatchSponsorItem {
+    /** Signed sponsored transaction hex */
+    txHex: string;
+    /**
+     * Fee amount in micro-units of feeToken (from estimateFee response).
+     * Omit for DEVELOPER_SPONSORS policy.
+     */
+    feeAmount?: string;
+}
+
+/**
+ * Per-item result returned by sponsorBatch()
+ */
+export type BatchSponsorItemResult =
+    | ({ index: number } & SponsorResult)
+    | { index: number; error: string };
+
+/**
+ * Response from velumx.sponsorBatch()
+ */
+export interface BatchSponsorResult {
+    results: BatchSponsorItemResult[];
+    summary: {
+        total: number;
+        succeeded: number;
+        failed: number;
+    };
+}
+
+/**
  * Error thrown when the VelumX relayer rejects a transaction
  */
 export class RelayerError extends Error {

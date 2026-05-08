@@ -246,6 +246,19 @@ export const createRateLimiters = (redisClient?: import('ioredis').Redis | null)
             message: 'Too many broadcast requests from this IP.'
         }, redisClient),
 
+        // Batch broadcast — 1 call can sponsor up to 25 txs, so limits are tighter
+        // to prevent a single key from flooding the network via batching.
+        batchBroadcast: new RateLimiter({
+            windowMs: 60000,
+            maxRequests: 5,
+            message: 'Too many batch broadcast requests. Please slow down.'
+        }, redisClient),
+        batchBroadcastIp: new IpRateLimiter({
+            windowMs: 60000,
+            maxRequests: 10,
+            message: 'Too many batch broadcast requests from this IP.'
+        }, redisClient),
+
         dashboard: new RateLimiter({
             windowMs: 60000,
             maxRequests: 120,

@@ -66,6 +66,9 @@ export type {
     SponsorOptions,
     FeeEstimateResult,
     SponsorResult,
+    BatchSponsorItem,
+    BatchSponsorItemResult,
+    BatchSponsorResult,
     ContractCallParams,
 } from './types';
 export { RelayerError } from './types';

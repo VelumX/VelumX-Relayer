@@ -37,8 +37,8 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key']
 }));
-// Limit request body to 64KB — sufficient for all tx payloads, blocks body-flood attacks
-app.use(express.json({ limit: '64kb' }));
+// Limit request body to 512KB — accommodates batch payloads (up to 25 tx hexes), blocks body-flood attacks
+app.use(express.json({ limit: '512kb' }));
 
 // Strip the X-Powered-By header — no need to advertise the stack
 app.disable('x-powered-by');
@@ -149,6 +149,104 @@ app.post('/api/v1/broadcast', validateApiKey, rateLimiters.broadcastIp.middlewar
         res.status(500).json({ error: error.message });
     }
 });
+
+/**
+ * POST /api/v1/broadcast/batch
+ *
+ * Sign and broadcast N sponsored transactions in a single API call.
+ *
+ * Request body:
+ * {
+ *   "transactions": [
+ *     { "txHex": "0x...", "feeAmount": "250000" },   // feeAmount optional
+ *     { "txHex": "0x..." },
+ *     ...
+ *   ],
+ *   "userId": "optional-override"   // falls back to the key's owner
+ * }
+ *
+ * Max batch size: 25 transactions per call.
+ *
+ * Response (always 200 — inspect each item's `error` field for per-item failures):
+ * {
+ *   "results": [
+ *     { "index": 0, "txid": "0x...", "status": "sponsored" },
+ *     { "index": 1, "error": "Transaction already processed (replay detected)" },
+ *     ...
+ *   ],
+ *   "summary": { "total": 3, "succeeded": 2, "failed": 1 }
+ * }
+ */
+const BATCH_MAX_SIZE = 25;
+
+app.post(
+    '/api/v1/broadcast/batch',
+    validateApiKey,
+    rateLimiters.batchBroadcastIp.middleware(),
+    rateLimiters.batchBroadcast.middleware(),
+    async (req: ApiKeyRequest, res: express.Response) => {
+        try {
+            const { transactions, userId } = req.body;
+
+            // ── Input validation ──────────────────────────────────────────────
+            if (!Array.isArray(transactions) || transactions.length === 0) {
+                return res.status(400).json({ error: 'Missing or empty "transactions" array' });
+            }
+            if (transactions.length > BATCH_MAX_SIZE) {
+                return res.status(400).json({
+                    error: `Batch size exceeds maximum of ${BATCH_MAX_SIZE} transactions`
+                });
+            }
+            for (let i = 0; i < transactions.length; i++) {
+                if (!transactions[i]?.txHex || typeof transactions[i].txHex !== 'string') {
+                    return res.status(400).json({ error: `Item at index ${i} is missing "txHex"` });
+                }
+            }
+            // ─────────────────────────────────────────────────────────────────
+
+            const effectiveUserId = userId || req.userId!;
+            const apiKeyId = req.apiKeyId!;
+
+            // Process all transactions concurrently — a failure in one does NOT abort others.
+            const settled = await Promise.allSettled(
+                transactions.map((item: { txHex: string; feeAmount?: string }) =>
+                    paymasterService.sponsorRawTransaction(
+                        item.txHex,
+                        apiKeyId,
+                        effectiveUserId,
+                        item.feeAmount
+                    )
+                )
+            );
+
+            const results = settled.map((outcome, index) => {
+                if (outcome.status === 'fulfilled') {
+                    return { index, ...outcome.value };
+                } else {
+                    return { index, error: outcome.reason?.message ?? 'Unknown error' };
+                }
+            });
+
+            const succeeded = results.filter(r => !('error' in r)).length;
+            const failed = results.length - succeeded;
+
+            // Invalidate dashboard cache once if any tx succeeded
+            if (succeeded > 0 && req.userId) {
+                await invalidateStatsCache(req.userId).catch(() => {});
+            }
+
+            console.log(`[Batch] key=${apiKeyId} total=${transactions.length} ok=${succeeded} fail=${failed}`);
+
+            res.json({
+                results,
+                summary: { total: transactions.length, succeeded, failed }
+            });
+        } catch (error: any) {
+            console.error('Batch Broadcast Error:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+);
 
 
 app.get('/api/dashboard/export-key', verifySupabaseToken, async (req: AuthRequest, res: express.Response) => {
