@@ -127,7 +127,8 @@ app.post('/api/v1/estimate', validateApiKey, rateLimiters.estimateIp.middleware(
         const estimation = await paymasterService.estimateFee(estimationIntent, req.apiKeyId!);
         const targetNetwork = estimationIntent.network as 'mainnet' | 'testnet';
         const relayerKey = paymasterService.getUserRelayerKey(req.userId!);
-        const relayerAddress = getAddressFromPrivateKey(relayerKey.replace(/^0x/, ''), targetNetwork);
+        const networkObj = targetNetwork === 'mainnet' ? STACKS_MAINNET : STACKS_TESTNET;
+        const relayerAddress = getAddressFromPrivateKey(relayerKey.replace(/^0x/, ''), networkObj);
         const paymasterAddress = paymasterService.getPaymasterAddress(targetNetwork);
         res.json({ ...estimation, relayerAddress, paymasterAddress });
     } catch (error: any) {

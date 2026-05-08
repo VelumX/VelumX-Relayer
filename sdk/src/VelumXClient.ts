@@ -261,11 +261,23 @@ export async function buildSponsoredContractCall(params: ContractCallParams): Pr
             const apiBase = network === 'mainnet'
                 ? 'https://api.mainnet.hiro.so'
                 : 'https://api.testnet.hiro.so';
-            // We can't derive address from pubkey without knowing the version byte,
-            // so nonce defaults to 0 when not provided — caller should pass it explicitly
-            // for production use to avoid nonce conflicts.
-            resolvedNonce = 0n;
-            void apiBase; // suppress unused warning
+            // Derive the sender address from the public key to fetch the correct nonce.
+            // publicKeyToAddress(publicKey, network) — network as StacksNetworkName string works in v7.
+            const { publicKeyToAddress } = await import('@stacks/transactions').catch(() => ({ publicKeyToAddress: null }));
+            if (publicKeyToAddress) {
+                const senderAddress = publicKeyToAddress(publicKey, network);
+                const res = await fetch(`${apiBase}/v2/accounts/${senderAddress}?proof=0`, {
+                    signal: AbortSignal.timeout(5000),
+                });
+                if (res.ok) {
+                    const data = await res.json() as { nonce?: number };
+                    resolvedNonce = BigInt(data.nonce ?? 0);
+                } else {
+                    resolvedNonce = 0n;
+                }
+            } else {
+                resolvedNonce = 0n;
+            }
         } catch {
             resolvedNonce = 0n;
         }

@@ -37,7 +37,9 @@ export interface ContractCallParams {
     /** Clarity function arguments */
     functionArgs: ClarityValue[];
     /** User's Stacks public key (hex) */
-    publicKey: string;    /** Transaction nonce — auto-fetched from Stacks API if omitted */
+    publicKey: string;    /** Transaction nonce — auto-fetched from the Stacks API if omitted.
+     *  Pass explicitly when building multiple transactions before any confirm,
+     *  incrementing by 1 per transaction to avoid BadNonce errors. */
     nonce?: bigint;
     /** Network override — defaults to client network */
     network?: 'mainnet' | 'testnet';
