@@ -439,45 +439,6 @@ app.get('/api/dashboard/logs', verifySupabaseToken, rateLimiters.dashboard.middl
     }
 });
 
-// ── Usage Logs (API audit trail) ──────────────────────────────────────────────
-
-app.get('/api/dashboard/usage-logs', verifySupabaseToken, rateLimiters.dashboard.middleware(), async (req: AuthRequest, res: express.Response) => {
-    try {
-        const userId = req.userId!;
-        const limit = Math.min(parseInt(req.query.limit as string || '200', 10), 500);
-
-        // Fetch all API keys for this user first, then get their usage logs
-        const userKeys = await (prisma.apiKey as any).findMany({
-            where: { userId },
-            select: { id: true, name: true }
-        });
-
-        if (userKeys.length === 0) {
-            return res.json([]);
-        }
-
-        const keyIds = userKeys.map((k: any) => k.id);
-        const keyNameMap = Object.fromEntries(userKeys.map((k: any) => [k.id, k.name]));
-
-        const usageLogs = await (prisma.usageLog as any).findMany({
-            where: { apiKeyId: { in: keyIds } },
-            orderBy: { createdAt: 'desc' },
-            take: limit,
-        });
-
-        // Attach key name to each log entry
-        const enriched = usageLogs.map((log: any) => ({
-            ...log,
-            apiKey: { name: keyNameMap[log.apiKeyId] || 'Unknown' }
-        }));
-
-        res.json(enriched);
-    } catch (error: any) {
-        console.error("Usage Logs Error:", error);
-        res.json([]);
-    }
-});
-
 // ── Analytics endpoint ────────────────────────────────────────────────────────
 
 app.get('/api/dashboard/analytics', verifySupabaseToken, rateLimiters.dashboard.middleware(), async (req: AuthRequest, res: express.Response) => {
@@ -551,7 +512,7 @@ app.get('/api/dashboard/analytics', verifySupabaseToken, rateLimiters.dashboard.
                 keyId: k.id,
                 keyName: k.name,
                 txCount: k._count.transactions,
-                successRate: 0, // would need a join to compute accurately
+                successRate: 0,
             })),
             successRate,
             avgDailyTx: total / daysNum,

@@ -46,7 +46,6 @@ export class StatusSyncService {
      */
     private async sync() {
         try {
-            // 1. Fetch 'Pending' transactions from the database
             const pendingTxs = await (prisma.transaction as any).findMany({
                 where: { status: 'Pending' },
                 take: 50
@@ -55,22 +54,10 @@ export class StatusSyncService {
             if (pendingTxs.length === 0) return;
             console.log(`[StatusSync] Checking ${pendingTxs.length} pending transactions...`);
 
-            // Mark transactions older than 2 hours as Failed — they've been silently dropped
-            const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
-            const stale = pendingTxs.filter((tx: any) => new Date(tx.createdAt) < twoHoursAgo);
-            if (stale.length > 0) {
-                const staleIds = stale.map((tx: any) => tx.id);
-                await (prisma.transaction as any).updateMany({
-                    where: { id: { in: staleIds } },
-                    data: { status: 'Failed' }
-                });
-                console.log(`[StatusSync] Marked ${stale.length} stale transactions as Failed`);
-            }
-
-            // Check remaining non-stale pending transactions against the chain
-            const fresh = pendingTxs.filter((tx: any) => new Date(tx.createdAt) >= twoHoursAgo);
-            for (const tx of fresh) {
-                await this.checkStatus(tx.id, tx.txid);
+            // Check every pending tx against the chain — never skip based on age alone.
+            // A tx that is old but confirmed on-chain must be marked Confirmed, not Failed.
+            for (const tx of pendingTxs) {
+                await this.checkStatus(tx.id, tx.txid, new Date(tx.createdAt));
             }
         } catch (error) {
             console.error('[StatusSync] Sync Pass Failed:', error);
@@ -78,17 +65,28 @@ export class StatusSyncService {
     }
 
     /**
-     * Check the status of a specific Stacks transaction
+     * Check the status of a specific Stacks transaction against the chain.
+     * Only falls back to Failed if the tx is >2h old AND still not found on-chain
+     * (i.e. it was silently dropped from the mempool before broadcasting).
      */
-    private async checkStatus(id: string, txid: string) {
+    private async checkStatus(id: string, txid: string, createdAt: Date) {
         try {
-            // 2. Query the Stacks API for the transaction status
             const url = `${this.baseUrl}/extended/v1/tx/${txid}`;
-            const response = await fetch(url);
-            
+            const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
+
             if (!response.ok) {
                 if (response.status === 404) {
-                    // Transaction not found on the network yet
+                    // Not on-chain yet. If it's been >2h it was silently dropped — mark Failed.
+                    // Otherwise leave it Pending and check again next cycle.
+                    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+                    if (createdAt < twoHoursAgo) {
+                        console.log(`[StatusSync] TX ${txid} not found after 2h — marking Failed`);
+                        const updated = await (prisma.transaction as any).update({
+                            where: { id },
+                            data: { status: 'Failed' }
+                        });
+                        if (updated?.userId) await invalidateStatsCache(updated.userId);
+                    }
                     return;
                 }
                 console.warn(`[StatusSync] API error for ${txid}: ${response.status}`);
@@ -96,10 +94,9 @@ export class StatusSyncService {
             }
 
             const data: any = await response.json();
-            const blockchainStatus = data.tx_status; // 'success', 'pending', 'abort_by_post_condition', 'dropped_*', etc.
+            const blockchainStatus = data.tx_status;
 
-            // 3. Map blockchain status to dashboard status
-            // Full list: https://docs.hiro.so/stacks/api/transactions/get-transaction
+            // Map blockchain status → dashboard status
             let newStatus = 'Pending';
             if (blockchainStatus === 'success') {
                 newStatus = 'Confirmed';
@@ -116,14 +113,12 @@ export class StatusSyncService {
                 newStatus = 'Failed';
             }
 
-            // 4. Update the database if the status has changed
             if (newStatus !== 'Pending') {
                 console.log(`[StatusSync] Updating TX ${txid}: ${newStatus}`);
                 const updated = await (prisma.transaction as any).update({
                     where: { id },
                     data: { status: newStatus }
                 });
-                // Invalidate dashboard cache for this user so next load is fresh
                 if (updated?.userId) await invalidateStatsCache(updated.userId);
             }
         } catch (error) {
