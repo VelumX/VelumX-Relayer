@@ -36,24 +36,21 @@ export default function DashboardOverview() {
     const metricCards = [
         {
             title: 'Gas Sponsored',
-            value: `$${formatUsd(currentStats.totalSponsored)}`,
+            value: '$' + formatUsd(currentStats.totalSponsored),
             unit: 'USD',
             icon: BatteryCharging,
-            trend: null,
         },
         {
             title: 'Active API Keys',
             value: statsData.activeKeys.toString(),
             unit: 'keys',
             icon: Activity,
-            trend: null,
         },
         {
             title: 'Transactions',
             value: currentStats.totalTransactions.toString(),
             unit: 'total',
             icon: Users,
-            trend: null,
         },
     ];
 
@@ -224,6 +221,23 @@ export default function DashboardOverview() {
                         </div>
                     ))}
                 </div>
+            </div>
+
+            {/* Quick links */}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {[
+                    { label: 'Analytics',    href: '/analytics',   desc: 'Volume & success rates',   icon: TrendingUp },
+                    { label: 'Health',       href: '/health',      desc: 'Service status & alerts',   icon: Activity },
+                    { label: 'Rate Limits',  href: '/rate-limits', desc: 'Throttling configuration',  icon: Activity },
+                ].map(link => (
+                    <a key={link.href} href={link.href} className="glass-card p-5 hover:border-white/20 transition-all group block">
+                        <div className="w-7 h-7 rounded-lg bg-white/[0.04] border border-white/[0.07] flex items-center justify-center mb-3">
+                            <link.icon className="w-3.5 h-3.5 text-white/40 group-hover:text-white/70 transition-colors" />
+                        </div>
+                        <p className="text-sm font-semibold text-white group-hover:text-white transition-colors">{link.label}</p>
+                        <p className="text-xs text-white/35 mt-0.5">{link.desc}</p>
+                    </a>
+                ))}
             </div>
 
         </div>

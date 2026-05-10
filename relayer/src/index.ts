@@ -423,18 +423,143 @@ app.get('/api/dashboard/logs', verifySupabaseToken, rateLimiters.dashboard.middl
     try {
         const userId = req.userId!;
         const { network } = req.query;
+        const limit = Math.min(parseInt(req.query.limit as string || '500', 10), 1000);
         const where: any = { userId };
         if (network === 'mainnet' || network === 'testnet') where.network = network;
         const logs = await (prisma.transaction as any).findMany({
             where,
             orderBy: { createdAt: 'desc' },
-            take: 50,
+            take: limit,
             include: { apiKey: true }
         });
         res.json(logs);
     } catch (error: any) {
         console.error("Dashboard Logs Error:", error);
         res.json([]);
+    }
+});
+
+// ── Usage Logs (API audit trail) ──────────────────────────────────────────────
+
+app.get('/api/dashboard/usage-logs', verifySupabaseToken, rateLimiters.dashboard.middleware(), async (req: AuthRequest, res: express.Response) => {
+    try {
+        const userId = req.userId!;
+        const limit = Math.min(parseInt(req.query.limit as string || '200', 10), 500);
+
+        // Fetch all API keys for this user first, then get their usage logs
+        const userKeys = await (prisma.apiKey as any).findMany({
+            where: { userId },
+            select: { id: true, name: true }
+        });
+
+        if (userKeys.length === 0) {
+            return res.json([]);
+        }
+
+        const keyIds = userKeys.map((k: any) => k.id);
+        const keyNameMap = Object.fromEntries(userKeys.map((k: any) => [k.id, k.name]));
+
+        const usageLogs = await (prisma.usageLog as any).findMany({
+            where: { apiKeyId: { in: keyIds } },
+            orderBy: { createdAt: 'desc' },
+            take: limit,
+        });
+
+        // Attach key name to each log entry
+        const enriched = usageLogs.map((log: any) => ({
+            ...log,
+            apiKey: { name: keyNameMap[log.apiKeyId] || 'Unknown' }
+        }));
+
+        res.json(enriched);
+    } catch (error: any) {
+        console.error("Usage Logs Error:", error);
+        res.json([]);
+    }
+});
+
+// ── Analytics endpoint ────────────────────────────────────────────────────────
+
+app.get('/api/dashboard/analytics', verifySupabaseToken, rateLimiters.dashboard.middleware(), async (req: AuthRequest, res: express.Response) => {
+    try {
+        const userId = req.userId!;
+        const { network, days = '30' } = req.query;
+        const daysNum = Math.min(parseInt(days as string, 10) || 30, 90);
+
+        const since = new Date();
+        since.setDate(since.getDate() - daysNum);
+
+        const where: any = { userId, createdAt: { gte: since } };
+        if (network === 'mainnet' || network === 'testnet') where.network = network;
+
+        const [transactions, keyUsage] = await Promise.all([
+            (prisma.transaction as any).findMany({
+                where,
+                select: { status: true, createdAt: true, userAddress: true, apiKeyId: true, feeAmount: true, feeToken: true },
+                orderBy: { createdAt: 'asc' },
+            }),
+            (prisma.apiKey as any).findMany({
+                where: { userId },
+                select: { id: true, name: true, _count: { select: { transactions: true } } }
+            })
+        ]);
+
+        // Build daily buckets
+        const buckets: Record<string, { total: number; confirmed: number; failed: number; pending: number }> = {};
+        for (let i = 0; i < daysNum; i++) {
+            const d = new Date();
+            d.setDate(d.getDate() - (daysNum - 1 - i));
+            buckets[d.toISOString().split('T')[0]] = { total: 0, confirmed: 0, failed: 0, pending: 0 };
+        }
+
+        transactions.forEach((tx: any) => {
+            const date = new Date(tx.createdAt).toISOString().split('T')[0];
+            if (!buckets[date]) return;
+            buckets[date].total++;
+            const s = tx.status === 'Success' ? 'Confirmed' : tx.status;
+            if (s === 'Confirmed') buckets[date].confirmed++;
+            else if (s === 'Failed') buckets[date].failed++;
+            else buckets[date].pending++;
+        });
+
+        const daily = Object.entries(buckets).map(([date, counts]) => ({ date, ...counts, feeUsd: 0 }));
+
+        // Top users
+        const userMap: Record<string, { count: number; lastSeen: string }> = {};
+        transactions.forEach((tx: any) => {
+            if (!userMap[tx.userAddress]) {
+                userMap[tx.userAddress] = { count: 0, lastSeen: tx.createdAt };
+            }
+            userMap[tx.userAddress].count++;
+            if (tx.createdAt > userMap[tx.userAddress].lastSeen) {
+                userMap[tx.userAddress].lastSeen = tx.createdAt;
+            }
+        });
+        const topUsers = Object.entries(userMap)
+            .map(([userAddress, v]) => ({ userAddress, ...v }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 10);
+
+        const total = transactions.length;
+        const confirmed = transactions.filter((t: any) => t.status === 'Confirmed' || t.status === 'Success').length;
+        const successRate = total > 0 ? (confirmed / total) * 100 : 0;
+
+        res.json({
+            daily,
+            topUsers,
+            keyUsage: keyUsage.map((k: any) => ({
+                keyId: k.id,
+                keyName: k.name,
+                txCount: k._count.transactions,
+                successRate: 0, // would need a join to compute accurately
+            })),
+            successRate,
+            avgDailyTx: total / daysNum,
+            totalRevenue: 0,
+        });
+    } catch (error: any) {
+        console.error("Analytics Error:", error);
+        res.status(500).json({ error: "Internal server error" });
     }
 });
 

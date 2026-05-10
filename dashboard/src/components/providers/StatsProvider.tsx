@@ -39,7 +39,6 @@ export interface LogEntry {
 interface StatsContextValue {
     stats: StatsData;
     logs: LogEntry[];
-    adapters: any[];
     isLoading: boolean;
     /** Force a fresh fetch — use sparingly (e.g. after a mutation) */
     refresh: () => Promise<void>;
@@ -69,7 +68,6 @@ const DEFAULT_STATS: StatsData = {
 const StatsContext = createContext<StatsContextValue>({
     stats: DEFAULT_STATS,
     logs: [],
-    adapters: [],
     isLoading: true,
     refresh: async () => {},
 });
@@ -82,11 +80,8 @@ export function StatsProvider({ children }: { children: React.ReactNode }) {
 
     const [stats, setStats] = useState<StatsData>(DEFAULT_STATS);
     const [logs, setLogs] = useState<LogEntry[]>([]);
-    const [adapters, setAdapters] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
-    // Track whether we've fetched at least once per network so we don't
-    // show the loading state again when navigating between pages.
     const fetchedNetworks = useRef<Set<string>>(new Set());
     const isFetchingRef = useRef(false);
 
@@ -94,12 +89,9 @@ export function StatsProvider({ children }: { children: React.ReactNode }) {
         if (!user) return;
         if (isFetchingRef.current) return;
 
-        // If we already have data for this network and it's not a forced refresh,
-        // skip the fetch entirely — data stays on screen instantly.
         if (!force && fetchedNetworks.current.has(network)) return;
 
         isFetchingRef.current = true;
-        // Only show the loading skeleton on the very first load
         if (!fetchedNetworks.current.has(network)) setIsLoading(true);
 
         try {
@@ -108,16 +100,15 @@ export function StatsProvider({ children }: { children: React.ReactNode }) {
             const token = session?.access_token;
             if (!token) return;
 
-            const [statsRes, logsRes, adaptersRes] = await Promise.all([
+            const [statsRes, logsRes] = await Promise.all([
                 fetch(`${RELAYER_URL}/api/dashboard/stats`, {
                     cache: 'no-store',
                     headers: { 'Authorization': `Bearer ${token}` },
                 }),
-                fetch(`${RELAYER_URL}/api/dashboard/logs?network=${network}`, {
+                fetch(`${RELAYER_URL}/api/dashboard/logs?network=${network}&limit=1000`, {
                     cache: 'no-store',
                     headers: { 'Authorization': `Bearer ${token}` },
                 }),
-                fetch('/api/adapters', { cache: 'no-store' }),
             ]);
 
             if (statsRes.ok) {
@@ -127,10 +118,6 @@ export function StatsProvider({ children }: { children: React.ReactNode }) {
             if (logsRes.ok) {
                 const data = await logsRes.json();
                 setLogs(Array.isArray(data) ? data : []);
-            }
-            if (adaptersRes.ok) {
-                const data = await adaptersRes.json();
-                setAdapters(data.adapters || []);
             }
 
             fetchedNetworks.current.add(network);
@@ -142,7 +129,6 @@ export function StatsProvider({ children }: { children: React.ReactNode }) {
         }
     }, [user, network]);
 
-    // Fetch when user is ready or network switches
     useEffect(() => {
         if (!userLoading && user) {
             fetchAll();
@@ -150,13 +136,12 @@ export function StatsProvider({ children }: { children: React.ReactNode }) {
     }, [user, userLoading, network, fetchAll]);
 
     const refresh = useCallback(() => {
-        // Clear the cache for the current network so the next fetchAll goes through
         fetchedNetworks.current.delete(network);
         return fetchAll(true);
     }, [network, fetchAll]);
 
     return (
-        <StatsContext.Provider value={{ stats, logs, adapters, isLoading, refresh }}>
+        <StatsContext.Provider value={{ stats, logs, isLoading, refresh }}>
             {children}
         </StatsContext.Provider>
     );
