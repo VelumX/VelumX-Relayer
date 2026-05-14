@@ -9,6 +9,13 @@ const HIRO_BASE: Record<'mainnet' | 'testnet', string> = {
     testnet: 'https://api.testnet.hiro.so',
 };
 
+// How long to wait after broadcast before trusting an abort/drop status from Hiro.
+// Stacks blocks are ~10 minutes apart, so a tx can legitimately sit in the mempool
+// for up to 10 minutes. Hiro can also transiently return abort_by_post_condition
+// while still indexing a freshly confirmed block. We wait 15 minutes to safely
+// clear both the block-wait window and the indexing lag before declaring Failed.
+const ABORT_CONFIRMATION_DELAY_MS = 15 * 60 * 1_000; // 15 minutes
+
 /**
  * StatusSyncService — polls pending transactions on both mainnet and testnet
  * and updates their status based on the actual on-chain result.
@@ -72,19 +79,17 @@ export class StatusSyncService {
      * Check a single transaction against the correct network's Hiro API.
      *
      * Resolution order:
-     *   1. tx_status === 'success'                          → Confirmed
-     *   2. tx_result.repr starts with '(ok '               → Confirmed
-     *      (handles edge cases where the sponsor wrapper post-condition
-     *       is flagged but the inner contract call actually succeeded)
-     *   3. tx_status is a hard abort/drop AND tx_result is (err ...) → Failed
-     *   4. Chain returns 404 + tx < 2h                     → still Pending
-     *   5. Chain returns 404 + tx ≥ 2h                     → Failed (dropped)
-     *   6. Any other API error                             → leave Pending, log warning
-     *
-     * NOTE: We intentionally do NOT mark a tx Failed based solely on
-     * tx_status abort codes. We always cross-check tx_result.repr so that
-     * a post-condition abort on the sponsor wrapper never hides a successful
-     * inner execution.
+     *   1. tx_status === 'success'                              → Confirmed immediately
+     *   2. tx_result.repr starts with '(ok '                   → Confirmed immediately
+     *      (handles cases where the sponsor wrapper post-condition is flagged
+     *       but the inner contract call actually succeeded)
+     *   3. Abort/drop status AND tx_result is NOT (ok ...)
+     *      AND tx is older than ABORT_CONFIRMATION_DELAY_MS    → Failed
+     *      (delay prevents marking Failed on Hiro's transient indexing state)
+     *   4. Abort/drop status but tx is still within the delay  → leave Pending, recheck next cycle
+     *   5. Chain returns 404 + tx < 2h                         → still Pending
+     *   6. Chain returns 404 + tx ≥ 2h                         → Failed (dropped from mempool)
+     *   7. Any other API error                                  → leave Pending, log warning
      */
     private async checkStatus(
         id: string,
@@ -115,6 +120,7 @@ export class StatusSyncService {
 
             const data: any = await res.json();
             const chainStatus: string = data.tx_status ?? '';
+
             // tx_result.repr is the canonical execution result from the Clarity VM.
             // It starts with '(ok ...)' on success and '(err ...)' on failure,
             // regardless of what the outer tx_status says.
@@ -123,22 +129,28 @@ export class StatusSyncService {
             let newStatus: string | null = null;
 
             if (chainStatus === 'success') {
-                // Unambiguous on-chain success
+                // Unambiguous on-chain success — act immediately
                 newStatus = 'Confirmed';
             } else if (resultRepr.startsWith('(ok ')) {
-                // tx_result says the contract call returned ok — treat as Confirmed
-                // even if tx_status shows an abort code on the sponsor wrapper layer
+                // Contract call returned ok — treat as Confirmed even if tx_status
+                // shows an abort code on the sponsor wrapper layer
                 console.log(`[StatusSync] ${network} TX ${txid}: tx_status=${chainStatus} but tx_result=${resultRepr} — marking Confirmed`);
                 newStatus = 'Confirmed';
             } else if (
-                (chainStatus === 'abort_by_post_condition' ||
-                 chainStatus === 'abort_by_response'       ||
-                 chainStatus === 'abort_by_mempool'        ||
-                 chainStatus.startsWith('dropped_'))
-                && !resultRepr.startsWith('(ok ')
+                chainStatus === 'abort_by_post_condition' ||
+                chainStatus === 'abort_by_response'       ||
+                chainStatus === 'abort_by_mempool'        ||
+                chainStatus.startsWith('dropped_')
             ) {
-                // Hard failure confirmed by both status and result
-                newStatus = 'Failed';
+                // Only trust an abort/drop after the confirmation delay has passed.
+                // Hiro can return these transiently while still indexing the block —
+                // acting on them immediately causes false Failed statuses.
+                const abortConfirmAge = new Date(Date.now() - ABORT_CONFIRMATION_DELAY_MS);
+                if (createdAt < abortConfirmAge) {
+                    newStatus = 'Failed';
+                } else {
+                    console.log(`[StatusSync] ${network} TX ${txid}: ${chainStatus} — within confirmation window, leaving Pending`);
+                }
             }
             // 'pending' or anything else → leave as-is
 
