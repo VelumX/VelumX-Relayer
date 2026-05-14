@@ -148,8 +148,11 @@ export default function DashboardOverview() {
                             d.setDate(d.getDate() - (6 - i));
                             return d.toISOString().split('T')[0];
                         });
+                        // logs are already network-scoped from StatsProvider, but filter
+                        // defensively in case stale entries linger during a network switch
+                        const networkLogs = logs.filter(l => (l.network || 'mainnet') === currentNetwork);
                         const totals = last7Days.map(date =>
-                            logs.filter(l => l.createdAt.startsWith(date)).length
+                            networkLogs.filter(l => l.createdAt.startsWith(date)).length
                         );
                         const max = Math.max(...totals, 1);
                         return totals.map((total, i) => (

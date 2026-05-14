@@ -310,7 +310,9 @@ app.get('/api/dashboard/stats', verifySupabaseToken, rateLimiters.dashboard.midd
                         .catch(() => null)
                 ]);
 
-                const totalSponsoredUsd = (stxPrice || 0) * (allBroadcastedTxs * 0.005);
+                const totalSponsoredUsd = networkType === 'testnet'
+                    ? 0  // testnet STX has no real USD value
+                    : (stxPrice || 0) * (allBroadcastedTxs * 0.005);
                 const relayerStxBalance: string = balancesData?.stx?.balance || "0";
 
                 // Wallet FT audit — convert all token balances to USD in parallel
@@ -436,6 +438,80 @@ app.get('/api/dashboard/logs', verifySupabaseToken, rateLimiters.dashboard.middl
     } catch (error: any) {
         console.error("Dashboard Logs Error:", error);
         res.json([]);
+    }
+});
+
+// ── Admin: manual status re-sync ─────────────────────────────────────────────
+// POST /api/dashboard/resync-failed?limit=3
+// Re-fetches the last `limit` Failed transactions from Hiro and corrects their
+// status if the chain says they actually succeeded.
+
+app.post('/api/dashboard/resync-failed', verifySupabaseToken, async (req: AuthRequest, res: express.Response) => {
+    try {
+        const userId = req.userId!;
+        const limit = Math.min(parseInt((req.query.limit as string) || '3', 10), 50);
+
+        // Grab the most recent Failed txs for this user
+        const failedTxs = await (prisma.transaction as any).findMany({
+            where: { userId, status: 'Failed' },
+            orderBy: { updatedAt: 'desc' },
+            take: limit,
+            select: { id: true, txid: true, network: true, createdAt: true },
+        });
+
+        if (failedTxs.length === 0) {
+            return res.json({ message: 'No failed transactions found.', corrected: 0, checked: 0 });
+        }
+
+        const HIRO_BASE: Record<string, string> = {
+            mainnet: 'https://api.mainnet.hiro.so',
+            testnet: 'https://api.testnet.hiro.so',
+        };
+
+        let corrected = 0;
+        const details: any[] = [];
+
+        await Promise.allSettled(
+            failedTxs.map(async (tx: any) => {
+                const baseUrl = HIRO_BASE[tx.network] ?? HIRO_BASE.mainnet;
+                try {
+                    const hiroRes = await fetch(`${baseUrl}/extended/v1/tx/${tx.txid}`, {
+                        signal: AbortSignal.timeout(8_000),
+                    });
+
+                    if (!hiroRes.ok) {
+                        details.push({ txid: tx.txid, action: 'skipped', reason: `Hiro returned ${hiroRes.status}` });
+                        return;
+                    }
+
+                    const data: any = await hiroRes.json();
+                    const chainStatus: string = data.tx_status ?? '';
+                    const resultRepr: string = data.tx_result?.repr ?? '';
+
+                    const isSuccess = chainStatus === 'success' || resultRepr.startsWith('(ok ');
+
+                    if (isSuccess) {
+                        await (prisma.transaction as any).update({
+                            where: { id: tx.id },
+                            data: { status: 'Confirmed' },
+                        });
+                        await invalidateStatsCache(userId).catch(() => {});
+                        corrected++;
+                        details.push({ txid: tx.txid, action: 'corrected', chainStatus, resultRepr });
+                    } else {
+                        details.push({ txid: tx.txid, action: 'left_as_failed', chainStatus, resultRepr });
+                    }
+                } catch (err: any) {
+                    details.push({ txid: tx.txid, action: 'error', reason: err.message });
+                }
+            })
+        );
+
+        console.log(`[ResyncFailed] user=${userId} checked=${failedTxs.length} corrected=${corrected}`);
+        res.json({ checked: failedTxs.length, corrected, details });
+    } catch (error: any) {
+        console.error('ResyncFailed Error:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 

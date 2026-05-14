@@ -92,7 +92,10 @@ export function StatsProvider({ children }: { children: React.ReactNode }) {
         if (!force && fetchedNetworks.current.has(network)) return;
 
         isFetchingRef.current = true;
-        if (!fetchedNetworks.current.has(network)) setIsLoading(true);
+        if (!fetchedNetworks.current.has(network)) {
+            setIsLoading(true);
+            setLogs([]); // clear stale logs from previous network immediately
+        }
 
         try {
             const supabase = (await import('@/lib/supabase/client')).createClient();
@@ -100,6 +103,8 @@ export function StatsProvider({ children }: { children: React.ReactNode }) {
             const token = session?.access_token;
             if (!token) return;
 
+            // Stats covers both networks in one call — always fetch fresh on network switch.
+            // Logs are network-scoped so they must also re-fetch on every network change.
             const [statsRes, logsRes] = await Promise.all([
                 fetch(`${RELAYER_URL}/api/dashboard/stats`, {
                     cache: 'no-store',

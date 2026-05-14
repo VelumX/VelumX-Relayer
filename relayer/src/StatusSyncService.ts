@@ -37,18 +37,29 @@ export class StatusSyncService {
 
     private async sync() {
         try {
-            const pendingTxs = await (prisma.transaction as any).findMany({
-                where: { status: 'Pending' },
+            // Check Pending txs + recently-Failed txs (within last 24h) so mis-classified
+            // transactions get a second look on the next cycle.
+            const recentFailedCutoff = new Date(Date.now() - 24 * 60 * 60 * 1_000);
+            const txsToCheck = await (prisma.transaction as any).findMany({
+                where: {
+                    OR: [
+                        { status: 'Pending' },
+                        { status: 'Failed', updatedAt: { gte: recentFailedCutoff } },
+                    ],
+                },
                 take: 100,
-                select: { id: true, txid: true, network: true, createdAt: true },
+                select: { id: true, txid: true, network: true, createdAt: true, status: true },
             });
 
-            if (pendingTxs.length === 0) return;
-            console.log(`[StatusSync] Checking ${pendingTxs.length} pending transactions...`);
+            if (txsToCheck.length === 0) return;
+
+            const pending = txsToCheck.filter((t: any) => t.status === 'Pending').length;
+            const recheck = txsToCheck.filter((t: any) => t.status === 'Failed').length;
+            console.log(`[StatusSync] Checking ${pending} pending + ${recheck} recently-failed transactions...`);
 
             // Process all in parallel — each tx picks its own network endpoint
             await Promise.allSettled(
-                pendingTxs.map((tx: any) =>
+                txsToCheck.map((tx: any) =>
                     this.checkStatus(tx.id, tx.txid, tx.network || 'mainnet', new Date(tx.createdAt))
                 )
             );
@@ -61,11 +72,19 @@ export class StatusSyncService {
      * Check a single transaction against the correct network's Hiro API.
      *
      * Resolution order:
-     *   1. Chain says success            → Confirmed
-     *   2. Chain says abort/dropped      → Failed
-     *   3. Chain returns 404 + tx < 2h  → still Pending (check next cycle)
-     *   4. Chain returns 404 + tx ≥ 2h  → Failed (silently dropped from mempool)
-     *   5. Any other API error           → leave Pending, log warning
+     *   1. tx_status === 'success'                          → Confirmed
+     *   2. tx_result.repr starts with '(ok '               → Confirmed
+     *      (handles edge cases where the sponsor wrapper post-condition
+     *       is flagged but the inner contract call actually succeeded)
+     *   3. tx_status is a hard abort/drop AND tx_result is (err ...) → Failed
+     *   4. Chain returns 404 + tx < 2h                     → still Pending
+     *   5. Chain returns 404 + tx ≥ 2h                     → Failed (dropped)
+     *   6. Any other API error                             → leave Pending, log warning
+     *
+     * NOTE: We intentionally do NOT mark a tx Failed based solely on
+     * tx_status abort codes. We always cross-check tx_result.repr so that
+     * a post-condition abort on the sponsor wrapper never hides a successful
+     * inner execution.
      */
     private async checkStatus(
         id: string,
@@ -96,23 +115,35 @@ export class StatusSyncService {
 
             const data: any = await res.json();
             const chainStatus: string = data.tx_status ?? '';
+            // tx_result.repr is the canonical execution result from the Clarity VM.
+            // It starts with '(ok ...)' on success and '(err ...)' on failure,
+            // regardless of what the outer tx_status says.
+            const resultRepr: string = data.tx_result?.repr ?? '';
 
             let newStatus: string | null = null;
 
             if (chainStatus === 'success') {
+                // Unambiguous on-chain success
+                newStatus = 'Confirmed';
+            } else if (resultRepr.startsWith('(ok ')) {
+                // tx_result says the contract call returned ok — treat as Confirmed
+                // even if tx_status shows an abort code on the sponsor wrapper layer
+                console.log(`[StatusSync] ${network} TX ${txid}: tx_status=${chainStatus} but tx_result=${resultRepr} — marking Confirmed`);
                 newStatus = 'Confirmed';
             } else if (
-                chainStatus === 'abort_by_post_condition' ||
-                chainStatus === 'abort_by_response'       ||
-                chainStatus === 'abort_by_mempool'        ||
-                chainStatus.startsWith('dropped_')
+                (chainStatus === 'abort_by_post_condition' ||
+                 chainStatus === 'abort_by_response'       ||
+                 chainStatus === 'abort_by_mempool'        ||
+                 chainStatus.startsWith('dropped_'))
+                && !resultRepr.startsWith('(ok ')
             ) {
+                // Hard failure confirmed by both status and result
                 newStatus = 'Failed';
             }
             // 'pending' or anything else → leave as-is
 
             if (newStatus) {
-                console.log(`[StatusSync] ${network} TX ${txid}: ${chainStatus} → ${newStatus}`);
+                console.log(`[StatusSync] ${network} TX ${txid}: ${chainStatus} (result: ${resultRepr || 'n/a'}) → ${newStatus}`);
                 await this.updateStatus(id, newStatus);
             }
         } catch (error) {
